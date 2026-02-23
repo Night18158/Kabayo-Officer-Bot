@@ -3,7 +3,10 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, Collection, REST, Routes } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
+const cron = require('node-cron');
 const config = require('./config');
+const { setSetting } = require('./database');
+const { closeWeek } = require('./utils/weekClose');
 
 // --- Load commands ---
 const commandsPath = path.join(__dirname, 'commands');
@@ -43,6 +46,21 @@ const client = new Client({
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
   await registerCommands();
+
+  // Persist the guild ID in settings so weekClose can fetch the guild
+  if (config.guildId) {
+    setSetting('guild_id', config.guildId);
+  }
+
+  // Schedule automatic week close every Sunday at 23:00 Europe/Madrid
+  cron.schedule('0 23 * * 0', async () => {
+    console.log('Cron: running automatic week close (Sunday 23:00 Europe/Madrid)...');
+    try {
+      await closeWeek(client);
+    } catch (err) {
+      console.error('Cron: week close failed:', err);
+    }
+  }, { timezone: 'Europe/Madrid' });
 });
 
 client.on('interactionCreate', async interaction => {

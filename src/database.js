@@ -184,6 +184,117 @@ function getCurrentWeekLabel() {
   return `${year}-W${String(weekNumber).padStart(2, '0')}`;
 }
 
+/**
+ * Set a single guild setting.
+ * @param {string} key
+ * @param {string} value
+ */
+function setSetting(key, value) {
+  db.prepare('INSERT OR REPLACE INTO guild_settings (key, value) VALUES (?, ?)').run(key, value);
+}
+
+/**
+ * Get a single guild setting value.
+ * @param {string} key
+ * @returns {string|null}
+ */
+function getSetting(key) {
+  const row = db.prepare('SELECT value FROM guild_settings WHERE key = ?').get(key);
+  return row ? row.value : null;
+}
+
+/**
+ * End-of-week reset: for each member save current → previous, update streaks,
+ * update consecutive red weeks, then zero out current fans and set status to RED.
+ */
+function resetWeeklyFans() {
+  const thresholds = getThresholds();
+  db.prepare(`
+    UPDATE members SET
+      weekly_fans_previous    = weekly_fans_current,
+      streak_target_weeks     = CASE WHEN weekly_fans_current >= ? THEN streak_target_weeks + 1 ELSE 0 END,
+      streak_elite_weeks      = CASE WHEN weekly_fans_current >= ? THEN streak_elite_weeks + 1 ELSE 0 END,
+      consecutive_red_weeks   = CASE WHEN weekly_status = 'RED' THEN consecutive_red_weeks + 1 ELSE 0 END,
+      weekly_fans_current     = 0,
+      weekly_status           = 'RED'
+  `).run(thresholds.streak_target_threshold, thresholds.elite_fans);
+}
+
+/**
+ * Get all members with a specific weekly status.
+ * @param {'GREEN'|'YELLOW'|'RED'} status
+ * @returns {Array}
+ */
+function getMembersByStatus(status) {
+  return db.prepare('SELECT * FROM members WHERE weekly_status = ? ORDER BY weekly_fans_current DESC').all(status);
+}
+
+/**
+ * Get all members who have not submitted any fans this week (current fans === 0).
+ * @returns {Array}
+ */
+function getMembersWithNoSubmission() {
+  return db.prepare('SELECT * FROM members WHERE weekly_fans_current = 0').all();
+}
+
+/**
+ * Get all weekly history entries for a specific week label.
+ * @param {string} weekLabel  e.g. "2026-W09"
+ * @returns {Array}
+ */
+function getWeeklyHistoryByWeek(weekLabel) {
+  return db.prepare(
+    'SELECT * FROM weekly_history WHERE week_label = ? ORDER BY fans DESC'
+  ).all(weekLabel);
+}
+
+/**
+ * Get season totals — sum of all weekly_history fans per member, sorted descending.
+ * @returns {Array<{ discord_user_id: string, in_game_name: string, total_fans: number }>}
+ */
+function getSeasonTotals() {
+  return db.prepare(`
+    SELECT m.discord_user_id, m.in_game_name, COALESCE(SUM(wh.fans), 0) AS total_fans
+    FROM members m
+    LEFT JOIN weekly_history wh ON m.discord_user_id = wh.discord_user_id
+    GROUP BY m.discord_user_id
+    ORDER BY total_fans DESC
+  `).all();
+}
+
+/**
+ * Get the member with the highest weekly_fans_current (the MVP).
+ * Returns null if no members exist.
+ * @returns {Object|null}
+ */
+function getMVP() {
+  return db.prepare(
+    'SELECT * FROM members ORDER BY weekly_fans_current DESC LIMIT 1'
+  ).get() ?? null;
+}
+
+/**
+ * Group members by consecutive red weeks for the officer summary.
+ * Uses the CURRENT (post-reset) consecutive_red_weeks values.
+ * @returns {{ firstWeek: Array, secondWeek: Array, thirdPlusWeek: Array }}
+ */
+function getRedWeekSummary() {
+  const all = db.prepare('SELECT * FROM members ORDER BY in_game_name ASC').all();
+  return {
+    firstWeek:     all.filter(m => m.consecutive_red_weeks === 1),
+    secondWeek:    all.filter(m => m.consecutive_red_weeks === 2),
+    thirdPlusWeek: all.filter(m => m.consecutive_red_weeks >= 3),
+  };
+}
+
+/**
+ * Emergency reset: zero out all fans and set status to RED without touching
+ * streaks or consecutive red week counters. For testing/emergency use only.
+ */
+function emergencyReset() {
+  db.prepare(`UPDATE members SET weekly_fans_current = 0, weekly_status = 'RED'`).run();
+}
+
 module.exports = {
   db,
   getSettings,
@@ -194,4 +305,14 @@ module.exports = {
   addWeeklyHistory,
   getAllMembers,
   getCurrentWeekLabel,
+  setSetting,
+  getSetting,
+  resetWeeklyFans,
+  emergencyReset,
+  getMembersByStatus,
+  getMembersWithNoSubmission,
+  getWeeklyHistoryByWeek,
+  getSeasonTotals,
+  getMVP,
+  getRedWeekSummary,
 };
