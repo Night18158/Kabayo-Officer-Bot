@@ -8,6 +8,7 @@ const {
   getThresholds,
 } = require('../database');
 const { formatFans } = require('./formatters');
+const { getTimeUntilReset } = require('./countdown');
 
 /**
  * Attempt to send a message to a channel by ID.
@@ -63,7 +64,8 @@ async function postNewWeekMessage(client) {
     '🟡 Minimum: 4.2M',
     '⚡ Elite: 5.5M+',
     '',
-    'Use `/submit fans:<number>` to log your weekly fans.',
+    'Fans are tracked automatically from uma.moe.',
+    'Officers can manually adjust with `/submit` or `/set-fans` if needed.',
     '',
     "Let's have a strong week everyone! 🔥",
   ].join('\n');
@@ -77,6 +79,7 @@ async function postNewWeekMessage(client) {
 async function postMidweekCheckpoint(client) {
   const channelId = getSetting('channel_tracker');
   const { avg, green, yellow, red, noSub } = calcStats();
+  const { formatted: countdown } = getTimeUntilReset();
 
   const msg = [
     '📊 **Midweek Checkpoint**',
@@ -88,6 +91,8 @@ async function postMidweekCheckpoint(client) {
     `🟡 ${yellow} members on track`,
     `🔴 ${red} members need a push`,
     `📭 ${noSub} members haven't submitted yet`,
+    '',
+    `⏳ Time remaining: ${countdown} until weekly reset`,
     '',
     'Still plenty of time — small daily runs make the difference! 💪',
   ].join('\n');
@@ -113,7 +118,9 @@ async function postMidweekCheckpoint(client) {
       `You're currently at ${fansText}.`,
       'Guild minimum is 4.2M fans.',
       '',
-      'No pressure — just a reminder that a small push before Sunday helps the whole team stay Top 500. 🤙',
+      `⏳ ${countdown} until weekly reset`,
+      '',
+      'No pressure — just a reminder that a small push helps the whole team stay Top 500. 🤙',
     ].join('\n');
 
     try {
@@ -132,12 +139,15 @@ async function postMidweekCheckpoint(client) {
 async function postPushDayMorning(client) {
   const channelId = getSetting('channel_push');
   const { avg } = calcStats();
+  const { formatted: countdown } = getTimeUntilReset();
 
   const msg = [
     '🔥 **KABAYO FAN PUSH DAY** 🔥',
     '',
     `Current Guild Average: ${formatFans(Math.round(avg))}`,
     'Top 500 Stable Target: 4.8M',
+    '',
+    `⏳ Time remaining: ${countdown} until weekly reset`,
     '',
     'Today is our team push day.',
     'Even +300K helps the guild massively.',
@@ -154,12 +164,13 @@ async function postPushDayMorning(client) {
 async function postPushDayEvening(client) {
   const channelId = getSetting('channel_push');
   const { avg, green, yellow, red, noSub } = calcStats();
+  const { formatted: countdown } = getTimeUntilReset();
 
   const msg = [
     '⏰ **Push Day Update**',
     '',
     `Guild Average: ${formatFans(Math.round(avg))}`,
-    'Hours remaining: ~5',
+    `⏳ Time remaining: ${countdown} until weekly reset`,
     '',
     `🟢 ${green} already GREEN`,
     `🟡 ${yellow} on track`,
@@ -190,7 +201,7 @@ async function sendFinalPushDMs(client) {
       : 'no submission yet';
 
     const dmMsg = [
-      '⏰ Final reminder — the week closes in ~1 hour!',
+      '⏰ Final reminder — 2h until weekly reset!',
       '',
       `Your current fans: ${fansText}`,
       'Status: 🔴 Needs Attention',
