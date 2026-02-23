@@ -6,10 +6,15 @@ const {
   getSetting,
   getThresholds,
   getRedWeekSummary,
+  DB_PATH,
+  BACKUP_DIR,
 } = require('../database');
 const { getStatusEmoji } = require('./statusLogic');
 const { formatFans } = require('./formatters');
 const { trySend, sendWeekCloseWarningDMs } = require('./scheduledMessages');
+const { postStreakMilestones } = require('./celebrations');
+const path = require('path');
+const fs = require('fs');
 
 /**
  * Find the MVP from a list of pre-reset members.
@@ -167,17 +172,32 @@ function buildPushWarnings() {
 
 /**
  * Full end-of-week close process:
- *  1. Snapshot current member state
- *  2. Save weekly history for all members (ensures non-submitters are recorded)
- *  3. Reset fans & update streaks
- *  4. Assign Discord roles
- *  5. Send weekly report to results channel
- *  6. Send push warnings to push channel
- *  7. Send officer summary to officer channel
+ *  1. Auto-backup the database
+ *  2. Snapshot current member state
+ *  3. Post streak milestone celebrations
+ *  4. Save weekly history for all members (ensures non-submitters are recorded)
+ *  5. Reset fans & update streaks
+ *  6. Assign Discord roles
+ *  7. Send weekly report to results channel
+ *  8. Send push warnings to push channel
+ *  9. Send officer summary to officer channel
  *
  * @param {import('discord.js').Client} client
  */
 async function closeWeek(client) {
+  // Auto-backup before close
+  try {
+    if (fs.existsSync(DB_PATH)) {
+      const weekLabel = getCurrentWeekLabel();
+      const backupName = `kabayo-${weekLabel}.db`;
+      const backupPath = path.join(BACKUP_DIR, backupName);
+      fs.copyFileSync(DB_PATH, backupPath);
+      console.log(`weekClose: auto-backup saved to ${backupPath}`);
+    }
+  } catch (err) {
+    console.error('weekClose: auto-backup failed:', err.message);
+  }
+
   const members = getAllMembers();          // pre-reset snapshot
   const weekLabel = getCurrentWeekLabel();
 
@@ -189,6 +209,13 @@ async function closeWeek(client) {
     if (!existingHistory.has(m.discord_user_id)) {
       addWeeklyHistory(m.discord_user_id, weekLabel, m.weekly_fans_current, m.weekly_status);
     }
+  }
+
+  // Post streak milestone celebrations before resetting
+  try {
+    await postStreakMilestones(client, members);
+  } catch (err) {
+    console.error('weekClose: streak milestones failed:', err.message);
   }
 
   // Reset fans + update streak/consecutive counters
