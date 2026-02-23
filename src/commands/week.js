@@ -1,12 +1,18 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { getAllMembers, emergencyReset } = require('../database');
 const { closeWeek } = require('../utils/weekClose');
+const { postNewWeekMessage } = require('../utils/scheduledMessages');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('week')
     .setDescription('(Officers) Week management commands.')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addSubcommand(sub =>
+      sub
+        .setName('start')
+        .setDescription('Announce the start of a new week in the tracker channel.')
+    )
     .addSubcommand(sub =>
       sub
         .setName('close')
@@ -20,6 +26,18 @@ module.exports = {
 
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
+
+    if (sub === 'start') {
+      await interaction.deferReply({ ephemeral: true });
+      try {
+        await postNewWeekMessage(interaction.client);
+        await interaction.editReply({ content: '✅ New week announced in #tracker.' });
+      } catch (err) {
+        console.error('Error posting week start:', err);
+        await interaction.editReply({ content: `❌ Failed to post week start: ${err.message}` });
+      }
+      return;
+    }
 
     if (sub === 'close') {
       await interaction.deferReply({ ephemeral: true });

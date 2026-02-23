@@ -47,6 +47,13 @@ db.exec(`
   );
 `);
 
+// Migration: add dm_warnings_enabled column if it doesn't exist
+try {
+  db.exec('ALTER TABLE members ADD COLUMN dm_warnings_enabled INTEGER DEFAULT 1');
+} catch (_) {
+  // Column already exists — safe to ignore
+}
+
 // Insert default settings if not already present
 const defaultSettings = {
   min_fans: '4200000',
@@ -106,20 +113,45 @@ function getMember(discordUserId) {
  * Register or update a member's IGN.
  * @param {string} discordUserId
  * @param {string} inGameName
+ * @param {boolean|null} [dmWarningsEnabled]  null = don't change (only applies on update)
  */
-function upsertMember(discordUserId, inGameName) {
+function upsertMember(discordUserId, inGameName, dmWarningsEnabled = null) {
   const now = new Date().toISOString();
   const existing = getMember(discordUserId);
   if (existing) {
-    db.prepare('UPDATE members SET in_game_name = ? WHERE discord_user_id = ?')
-      .run(inGameName, discordUserId);
+    if (dmWarningsEnabled !== null) {
+      db.prepare('UPDATE members SET in_game_name = ?, dm_warnings_enabled = ? WHERE discord_user_id = ?')
+        .run(inGameName, dmWarningsEnabled ? 1 : 0, discordUserId);
+    } else {
+      db.prepare('UPDATE members SET in_game_name = ? WHERE discord_user_id = ?')
+        .run(inGameName, discordUserId);
+    }
   } else {
+    const dmVal = dmWarningsEnabled === false ? 0 : 1;
     db.prepare(`
-      INSERT INTO members (discord_user_id, in_game_name, created_at)
-      VALUES (?, ?, ?)
-    `).run(discordUserId, inGameName, now);
+      INSERT INTO members (discord_user_id, in_game_name, created_at, dm_warnings_enabled)
+      VALUES (?, ?, ?, ?)
+    `).run(discordUserId, inGameName, now, dmVal);
   }
   return getMember(discordUserId);
+}
+
+/**
+ * Set dm_warnings_enabled for a member.
+ * @param {string} discordUserId
+ * @param {boolean} enabled
+ */
+function setDmWarnings(discordUserId, enabled) {
+  db.prepare('UPDATE members SET dm_warnings_enabled = ? WHERE discord_user_id = ?')
+    .run(enabled ? 1 : 0, discordUserId);
+}
+
+/**
+ * Get all members who have DM warnings enabled.
+ * @returns {Array}
+ */
+function getMembersWithDmEnabled() {
+  return db.prepare('SELECT * FROM members WHERE dm_warnings_enabled = 1').all();
 }
 
 /**
@@ -301,6 +333,8 @@ module.exports = {
   getThresholds,
   getMember,
   upsertMember,
+  setDmWarnings,
+  getMembersWithDmEnabled,
   submitFans,
   addWeeklyHistory,
   getAllMembers,

@@ -7,6 +7,13 @@ const cron = require('node-cron');
 const config = require('./config');
 const { setSetting } = require('./database');
 const { closeWeek } = require('./utils/weekClose');
+const {
+  postNewWeekMessage,
+  postMidweekCheckpoint,
+  postPushDayMorning,
+  postPushDayEvening,
+  sendFinalPushDMs,
+} = require('./utils/scheduledMessages');
 
 // --- Load commands ---
 const commandsPath = path.join(__dirname, 'commands');
@@ -59,6 +66,56 @@ client.once('ready', async () => {
       await closeWeek(client);
     } catch (err) {
       console.error('Cron: week close failed:', err);
+    }
+  }, { timezone: 'Europe/Madrid' });
+
+  // Monday 00:00 — Auto week start
+  cron.schedule('0 0 * * 1', async () => {
+    console.log('Cron: new week started (Monday 00:00 Europe/Madrid)');
+    try {
+      await postNewWeekMessage(client);
+    } catch (err) {
+      console.error('Cron: week start message failed:', err);
+    }
+  }, { timezone: 'Europe/Madrid' });
+
+  // Thursday 20:00 — Midweek checkpoint
+  cron.schedule('0 20 * * 4', async () => {
+    console.log('Cron: midweek checkpoint (Thursday 20:00 Europe/Madrid)');
+    try {
+      await postMidweekCheckpoint(client);
+    } catch (err) {
+      console.error('Cron: midweek checkpoint failed:', err);
+    }
+  }, { timezone: 'Europe/Madrid' });
+
+  // Sunday 10:00 — Fan Push Day morning
+  cron.schedule('0 10 * * 0', async () => {
+    console.log('Cron: push day morning (Sunday 10:00 Europe/Madrid)');
+    try {
+      await postPushDayMorning(client);
+    } catch (err) {
+      console.error('Cron: push day morning failed:', err);
+    }
+  }, { timezone: 'Europe/Madrid' });
+
+  // Sunday 18:00 — Fan Push Day evening
+  cron.schedule('0 18 * * 0', async () => {
+    console.log('Cron: push day evening (Sunday 18:00 Europe/Madrid)');
+    try {
+      await postPushDayEvening(client);
+    } catch (err) {
+      console.error('Cron: push day evening failed:', err);
+    }
+  }, { timezone: 'Europe/Madrid' });
+
+  // Sunday 22:00 — Final push DMs
+  cron.schedule('0 22 * * 0', async () => {
+    console.log('Cron: final push DMs (Sunday 22:00 Europe/Madrid)');
+    try {
+      await sendFinalPushDMs(client);
+    } catch (err) {
+      console.error('Cron: final push DMs failed:', err);
     }
   }, { timezone: 'Europe/Madrid' });
 });

@@ -9,25 +9,7 @@ const {
 } = require('../database');
 const { getStatusEmoji } = require('./statusLogic');
 const { formatFans } = require('./formatters');
-
-/**
- * Attempt to send a message to a channel by ID.
- * Silently ignores errors if the channel is not found or not writable.
- * @param {import('discord.js').Client} client
- * @param {string|null} channelId
- * @param {string} content
- */
-async function trySend(client, channelId, content) {
-  if (!channelId) return;
-  try {
-    const channel = await client.channels.fetch(channelId);
-    if (channel && channel.isTextBased()) {
-      await channel.send({ content });
-    }
-  } catch (err) {
-    console.error(`weekClose: failed to send to channel ${channelId}:`, err.message);
-  }
-}
+const { trySend, sendWeekCloseWarningDMs } = require('./scheduledMessages');
 
 /**
  * Find the MVP from a list of pre-reset members.
@@ -246,7 +228,14 @@ async function closeWeek(client) {
     await trySend(client, channelPush, pushText);
   }
 
+  // Send DMs to RED members (post-reset consecutive_red_weeks values)
+  try {
+    await sendWeekCloseWarningDMs(client);
+  } catch (err) {
+    console.error('weekClose: failed to send week-close DMs:', err.message);
+  }
+
   console.log(`weekClose: week ${weekLabel} closed successfully.`);
 }
 
-module.exports = { closeWeek };
+module.exports = { closeWeek, trySend };
