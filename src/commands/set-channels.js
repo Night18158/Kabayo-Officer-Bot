@@ -1,11 +1,11 @@
-const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder } = require('discord.js');
 const { setSetting } = require('../database');
+const { isOfficer, officerOnlyMessage } = require('../utils/permissions');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('set-channels')
     .setDescription('(Officers) Configure the channels used by the bot.')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addChannelOption(opt =>
       opt.setName('tracker').setDescription('Fan submission tracker channel').setRequired(false)
     )
@@ -23,6 +23,11 @@ module.exports = {
     ),
 
   async execute(interaction) {
+    const member = await interaction.guild.members.fetch(interaction.user.id);
+    if (!isOfficer(member)) {
+      return interaction.reply({ content: officerOnlyMessage(), ephemeral: true });
+    }
+
     const mapping = {
       tracker: 'channel_tracker',
       results: 'channel_results',

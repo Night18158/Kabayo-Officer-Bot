@@ -1,93 +1,84 @@
-const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder } = require('discord.js');
 const { getMember, submitFans, addWeeklyHistory, getThresholds, getCurrentWeekLabel, getSetting } = require('../database');
-const { calculateStatus, getStatusEmoji, getStatusLabel, fansNeededForNext } = require('../utils/statusLogic');
+const { calculateStatus, getStatusEmoji, getStatusLabel } = require('../utils/statusLogic');
 const { formatFans, formatNumber } = require('../utils/formatters');
 const { trySend } = require('../utils/scheduledMessages');
+const { isOfficer } = require('../utils/permissions');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('submit')
-    .setDescription('Submit your weekly fan count.')
-    .addIntegerOption(option =>
-      option
-        .setName('fans')
-        .setDescription('Your total fans this week')
-        .setRequired(true)
-        .setMinValue(0)
-    )
+    .setDescription('(Officers) Add fans to a member\'s weekly total.')
     .addUserOption(option =>
       option
         .setName('user')
-        .setDescription('(Officers only) Submit on behalf of another member')
-        .setRequired(false)
+        .setDescription('The member to submit fans for')
+        .setRequired(true)
+    )
+    .addIntegerOption(option =>
+      option
+        .setName('fans')
+        .setDescription('Fans to add to the member\'s current total')
+        .setRequired(true)
+        .setMinValue(0)
     ),
 
   async execute(interaction) {
-    const fans = interaction.options.getInteger('fans');
-    const targetUser = interaction.options.getUser('user');
-
-    // Determine whose submission this is
-    let subjectId = interaction.user.id;
-    let subjectName = interaction.user.username;
-
-    if (targetUser) {
-      // Only allow officers (manage guild permission) to submit for others
-      const member = await interaction.guild.members.fetch(interaction.user.id);
-      if (!member.permissions.has(PermissionFlagsBits.ManageGuild)) {
-        await interaction.reply({
-          content: '❌ Only officers can submit on behalf of other members.',
-          ephemeral: true,
-        });
-        return;
-      }
-      subjectId = targetUser.id;
-      subjectName = targetUser.username;
-    }
-
-    const dbMember = getMember(subjectId);
-    if (!dbMember) {
-      const mention = targetUser ? `<@${subjectId}>` : 'You are';
-      await interaction.reply({
-        content: `❌ ${mention} not registered yet. Use \`/register\` first.`,
+    const member = await interaction.guild.members.fetch(interaction.user.id);
+    if (!isOfficer(member)) {
+      return interaction.reply({
+        content: '❌ Fans are tracked automatically from uma.moe.\nIf something looks wrong, ask a Guild Officer to correct it.',
         ephemeral: true,
       });
-      return;
     }
 
+    const targetUser = interaction.options.getUser('user');
+    const fansToAdd  = interaction.options.getInteger('fans');
+
+    const dbMember = getMember(targetUser.id);
+    if (!dbMember) {
+      return interaction.reply({
+        content: `❌ <@${targetUser.id}> is not registered yet. Use \`/register\` first.`,
+        ephemeral: true,
+      });
+    }
+
+    const prevFans   = dbMember.weekly_fans_current;
+    const newTotal   = prevFans + fansToAdd;
     const thresholds = getThresholds();
-    const status = calculateStatus(fans, thresholds);
-    const weekLabel = getCurrentWeekLabel();
+    const status     = calculateStatus(newTotal, thresholds);
+    const weekLabel  = getCurrentWeekLabel();
 
-    submitFans(subjectId, fans, status);
-    addWeeklyHistory(subjectId, weekLabel, fans, status);
+    submitFans(targetUser.id, newTotal, status, 'manual');
+    addWeeklyHistory(targetUser.id, weekLabel, newTotal, status);
 
-    const emoji = getStatusEmoji(status);
-    const label = getStatusLabel(status);
-    const nextInfo = fansNeededForNext(fans, thresholds);
-    const submittedFor = targetUser ? ` for **${dbMember.in_game_name}**` : '';
+    const emoji    = getStatusEmoji(status);
+    const label    = getStatusLabel(status);
+    const nextInfo = newTotal < thresholds.elite_fans
+      ? `Fans needed for ELITE: +${formatFans(thresholds.elite_fans - newTotal)}`
+      : '✅ Already at ELITE tier!';
 
     await interaction.reply({
       content: [
-        `${emoji} Fans submitted${submittedFor}!`,
-        ``,
-        `**IGN:** ${dbMember.in_game_name}`,
-        `**Week:** ${weekLabel}`,
-        `**Fans:** ${formatNumber(fans)} (${formatFans(fans)})`,
-        `**Status:** ${emoji} ${label}`,
-        ``,
+        `✅ Fans added for **${dbMember.in_game_name}**!`,
+        '',
+        `Previous: ${formatNumber(prevFans)} (${formatFans(prevFans)})`,
+        `Added: +${formatNumber(fansToAdd)} (${formatFans(fansToAdd)})`,
+        `New Total: ${formatNumber(newTotal)} (${formatFans(newTotal)})`,
+        `Status: ${emoji} ${label}`,
+        '',
         nextInfo,
       ].join('\n'),
       ephemeral: true,
     });
 
     // Live feed: post noteworthy submissions to channel_tracker
-    const thresholdsCheck = getThresholds();
-    if (fans >= thresholdsCheck.elite_fans) {
+    if (newTotal >= thresholds.elite_fans) {
       const trackerChannel = getSetting('channel_tracker');
-      await trySend(interaction.client, trackerChannel, `⚡ **${dbMember.in_game_name}** just submitted **${formatFans(fans)}** — Elite performance!`);
-    } else if (fans >= thresholdsCheck.target_fans) {
+      await trySend(interaction.client, trackerChannel, `⚡ **${dbMember.in_game_name}** just hit **${formatFans(newTotal)}** — Elite performance!`);
+    } else if (newTotal >= thresholds.target_fans) {
       const trackerChannel = getSetting('channel_tracker');
-      await trySend(interaction.client, trackerChannel, `🟢 **${dbMember.in_game_name}** just hit GREEN with **${formatFans(fans)}**!`);
+      await trySend(interaction.client, trackerChannel, `🟢 **${dbMember.in_game_name}** just hit GREEN with **${formatFans(newTotal)}**!`);
     }
   },
 };
