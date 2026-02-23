@@ -25,31 +25,66 @@ async function fetchCircleData(circleId, year, month) {
 }
 
 /**
- * Calculate weekly fans from daily_fans array.
+ * Walk backwards through dailyFans to find the last index with value > 0.
+ * @param {number[]} dailyFans
+ * @returns {number} Last index with data, or -1 if none
+ */
+function findLastDataIndex(dailyFans) {
+  for (let i = dailyFans.length - 1; i >= 0; i--) {
+    if (dailyFans[i] > 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * Find the 0-indexed baseline day (Sunday before the Monday of the week
+ * that contains lastDataIndex).
+ * @param {number} year
+ * @param {number} month - 1-indexed
+ * @param {number} lastDataIndex - 0-indexed day of month
+ * @returns {number} 0-indexed baseline index (may be negative if before month start)
+ */
+function findWeekBaseIndex(year, month, lastDataIndex) {
+  const day = lastDataIndex + 1; // 1-indexed day of month
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const dow = date.getUTCDay(); // 0=Sun, 1=Mon, ...
+  const daysSinceMonday = dow === 0 ? 6 : dow - 1;
+  const mondayDay = day - daysSinceMonday;
+  const sundayDay = mondayDay - 1; // Sunday before the week's Monday
+  return sundayDay - 1; // convert to 0-indexed
+}
+
+/**
+ * Calculate weekly fans from a cumulative daily_fans array.
  * Uma week = Monday 04:00 JST to next Monday 04:00 JST.
  * daily_fans is indexed by day of month (0-indexed: index 0 = day 1).
  * @param {number[]} dailyFans - Array of cumulative total fans per day of month
- * @param {number} weekStartDay - 1-indexed start day of month
- * @param {number} currentDay - 1-indexed current day of month
+ * @param {number} year
+ * @param {number} month - 1-indexed
  * @returns {number} Weekly fans gained
  */
-function calculateWeeklyFans(dailyFans, weekStartDay, currentDay) {
-  const startIndex = weekStartDay - 1;
-  const endIndex = currentDay - 1;
+function calculateWeeklyFans(dailyFans, year, month) {
+  const lastIndex = findLastDataIndex(dailyFans);
+  if (lastIndex < 0) return 0;
 
-  if (
-    startIndex < 0 ||
-    endIndex < 0 ||
-    startIndex >= dailyFans.length ||
-    endIndex >= dailyFans.length
-  ) {
-    return 0;
+  let baseIndex = findWeekBaseIndex(year, month, lastIndex);
+
+  // Edge case: week started at/before beginning of month — use day 1 as fallback
+  if (baseIndex < 0) {
+    baseIndex = 0;
   }
 
-  // If start equals end (same day), no fans gained yet this week
-  if (startIndex === endIndex) return 0;
+  // Edge case: member transferred mid-month with no data at base day
+  if (!(dailyFans[baseIndex] > 0)) {
+    let found = -1;
+    for (let i = baseIndex + 1; i <= lastIndex; i++) {
+      if (dailyFans[i] > 0) { found = i; break; }
+    }
+    if (found < 0) return 0;
+    baseIndex = found;
+  }
 
-  const result = dailyFans[endIndex] - dailyFans[startIndex];
+  const result = dailyFans[lastIndex] - dailyFans[baseIndex];
   return result < 0 ? 0 : result;
 }
 
@@ -66,24 +101,13 @@ async function runAutoImport() {
   const circleId = getSetting('uma_circle_id') || DEFAULT_CIRCLE_ID;
   const now = new Date();
 
-  // Calculate JST time reliably (UTC+9)
+  // Calculate JST time (UTC+9) — used only for determining which month to fetch
   const jstOffset = 9 * 60 * 60 * 1000;
   const jstNow = new Date(now.getTime() + jstOffset);
-  const year = jstNow.getUTCFullYear();
-  const month = jstNow.getUTCMonth() + 1;
-  const currentDay = jstNow.getUTCDate();
+  const fetchYear = jstNow.getUTCFullYear();
+  const fetchMonth = jstNow.getUTCMonth() + 1;
 
-  // Calculate week start day (last Monday in JST)
-  const dayOfWeek = jstNow.getUTCDay();
-  const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-  let weekStartDay = currentDay - daysSinceMonday;
-
-  // Handle month boundary: if week started in previous month, use day 1
-  if (weekStartDay < 1) {
-    weekStartDay = 1;
-  }
-
-  const data = await fetchCircleData(circleId, year, month);
+  const data = await fetchCircleData(circleId, fetchYear, fetchMonth);
   const allMembers = getAllMembers();
 
   let imported = 0;
@@ -114,8 +138,8 @@ async function runAutoImport() {
     try {
       const weeklyFans = calculateWeeklyFans(
         umaMember.daily_fans,
-        weekStartDay,
-        currentDay
+        fetchYear,
+        fetchMonth
       );
       // Only update if new value is higher than what's currently stored
       if (weeklyFans > dbMember.weekly_fans_current) {
@@ -134,4 +158,4 @@ async function runAutoImport() {
   return { imported, skipped, unmatched, errors, total: data.members.length, autoRegistered };
 }
 
-module.exports = { fetchCircleData, calculateWeeklyFans, runAutoImport, DEFAULT_CIRCLE_ID };
+module.exports = { fetchCircleData, findLastDataIndex, findWeekBaseIndex, calculateWeeklyFans, runAutoImport, DEFAULT_CIRCLE_ID };

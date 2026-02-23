@@ -60,6 +60,25 @@ client.once('ready', async () => {
     setSetting('guild_id', config.guildId);
   }
 
+  // Helper: run auto-import and persist results
+  async function doAutoImport(source) {
+    console.log(`Auto-import [${source}]: running...`);
+    try {
+      const result = await runAutoImport();
+      console.log(`Auto-import [${source}]: ${result.imported} imported, ${result.skipped} skipped, ${result.unmatched.length} unmatched`);
+      setSetting('last_import_time', new Date().toISOString());
+      setSetting('last_import_result', JSON.stringify(result));
+    } catch (err) {
+      console.error(`Auto-import [${source}] failed:`, err);
+    }
+  }
+
+  // 30 s after boot — quick import with whatever data uma.moe has right now
+  setTimeout(() => doAutoImport('boot-30s'), 30 * 1000);
+
+  // 3 h after boot — fresh data should be available by then
+  setTimeout(() => doAutoImport('boot-3h'), 3 * 60 * 60 * 1000);
+
   // Monday 03:55 JST — Week close + report + roles (5 min before Uma reset)
   cron.schedule('55 3 * * 1', async () => {
     console.log('Cron: running automatic week close (Monday 03:55 JST)...');
@@ -120,18 +139,9 @@ client.once('ready', async () => {
     }
   }, { timezone: 'Asia/Tokyo' });
 
-  // Daily at 07:00 JST — Auto-import from uma.moe (~3h after daily Uma reset at 04:00)
-  cron.schedule('0 7 * * *', async () => {
-    console.log('Cron: running daily auto-import from uma.moe');
-    try {
-      const result = await runAutoImport();
-      console.log(`Auto-import: ${result.imported} imported, ${result.skipped} skipped, ${result.unmatched.length} unmatched`);
-      // Store timestamp in UTC ISO format; import-status converts to JST for display
-      setSetting('last_import_time', new Date().toISOString());
-      setSetting('last_import_result', JSON.stringify(result));
-    } catch (err) {
-      console.error('Auto-import failed:', err);
-    }
+  // Every 6 hours — Auto-import from uma.moe (catches all timezone edge cases)
+  cron.schedule('0 */6 * * *', async () => {
+    await doAutoImport('cron-6h');
   }, { timezone: 'Asia/Tokyo' });
 });
 
