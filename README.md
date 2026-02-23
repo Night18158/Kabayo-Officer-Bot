@@ -96,11 +96,13 @@ Run these commands once after the bot is online:
 | `/leaderboard [type] [sort] [count]` | Display the guild fan leaderboard |
 | `/hall-of-fame` | Show top performers and streak holders |
 | `/stats` | Display circle-wide statistics and averages |
+| `/top` | Show the top 5 members by fans this week |
+| `/goal` | See how many fans you need to reach the next tier |
+| `/compare user:@member` | Compare your stats with another member |
 | `/help` | Show all available commands |
 | `/link-profile trainer:<name>` | Link your uma.moe trainer name to your Discord account |
 | `/feedback message:<text>` | Send anonymous feedback to officers |
 | `/dm-warnings [enable/disable]` | Toggle personal push-day DM reminders |
-| `/register ign:<name>` | Register your in-game name |
 | `/week status` | Show the current week's progress summary |
 
 ### Officers (Guild Officer + Leader)

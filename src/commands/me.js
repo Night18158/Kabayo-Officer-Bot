@@ -12,7 +12,7 @@ module.exports = {
     const dbMember = getMember(interaction.user.id);
     if (!dbMember) {
       return interaction.reply({
-        content: '❌ You are not registered. Use `/register` first.',
+        content: '❌ You are not registered. Use `/link-profile` first.',
         ephemeral: true,
       });
     }
@@ -51,7 +51,7 @@ module.exports = {
           `   ${stats.trend} Trend: ${stats.trend === '↗️' ? 'Improving' : stats.trend === '↘️' ? 'Declining' : 'Stable'}`,
         ].join('\n') : '',
       ].filter(l => l !== '').join('\n'),
-      ephemeral: true,
+      ephemeral: false,
     });
   },
 };

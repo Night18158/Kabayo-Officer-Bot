@@ -38,7 +38,7 @@ module.exports = {
     const dbMember = getMember(targetUser.id);
     if (!dbMember) {
       return interaction.reply({
-        content: `❌ <@${targetUser.id}> is not registered yet. Use \`/register\` first.`,
+        content: `❌ <@${targetUser.id}> is not registered yet.`,
         ephemeral: true,
       });
     }

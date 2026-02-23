@@ -18,7 +18,7 @@ module.exports = {
 
     if (!member) {
       await interaction.reply({
-        content: '❌ You need to `/register` first.',
+        content: '❌ You are not registered. Use `/link-profile` first.',
         ephemeral: true,
       });
       return;

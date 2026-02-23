@@ -245,6 +245,19 @@ async function closeWeek(client) {
   const reportText = buildWeeklyReport(members, weekLabel);
   await trySend(client, channelResults, reportText);
 
+  // Send MVP announcement
+  const mvp = findMVP(members);
+  if (mvp) {
+    const mvpMsg = [
+      `🏆 **MVP of the Week — ${weekLabel}**`,
+      '',
+      `Congratulations to **${mvp.in_game_name}** for leading the guild this week with **${formatFans(mvp.weekly_fans_current)}** fans! 🎉`,
+      '',
+      'Amazing effort — you inspire the whole team! ⭐',
+    ].join('\n');
+    await trySend(client, channelResults, mvpMsg);
+  }
+
   // Send officer summary (post-reset data for consecutive counts)
   const officerText = buildOfficerSummary(weekLabel);
   await trySend(client, channelOfficer, officerText);
