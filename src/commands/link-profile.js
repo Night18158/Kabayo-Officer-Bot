@@ -90,7 +90,7 @@ module.exports = {
       // No placeholder found either — user needs to register
       const mention = targetUserOption ? `<@${targetUserId}>` : 'You';
       return interaction.reply({
-        content: `❌ ${mention} need${targetUserOption ? 's' : ''} to \`/register\` first, or the uma.moe name **${umaName}** was not found. Run \`/auto-import\` first.`,
+        content: `❌ ${mention} need${targetUserOption ? 's' : ''} to use \`/link-profile\` first, or the uma.moe name **${umaName}** was not found. Run \`/auto-import\` first.`,
         ephemeral: true,
       });
     }

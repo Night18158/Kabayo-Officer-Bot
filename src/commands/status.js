@@ -22,7 +22,7 @@ module.exports = {
       const isSelf = targetUser.id === interaction.user.id;
       await interaction.reply({
         content: isSelf
-          ? '❌ You are not registered yet. Use `/register` first.'
+          ? '❌ You are not registered yet. Use `/link-profile` first.'
           : `❌ <@${targetUser.id}> is not registered yet.`,
         ephemeral: true,
       });

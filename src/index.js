@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const cron = require('node-cron');
 const config = require('./config');
-const { setSetting } = require('./database');
+const { getSetting, setSetting } = require('./database');
 const { closeWeek } = require('./utils/weekClose');
 const {
   postNewWeekMessage,
@@ -13,6 +13,8 @@ const {
   postPushDayMorning,
   postPushDayEvening,
   sendFinalPushDMs,
+  postDailyFanUpdate,
+  sendStreakAlertDMs,
 } = require('./utils/scheduledMessages');
 const { runAutoImport } = require('./utils/umaImport');
 
@@ -48,6 +50,7 @@ async function registerCommands() {
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
   ],
 });
 
@@ -68,6 +71,7 @@ client.once('ready', async () => {
       console.log(`Auto-import [${source}]: ${result.imported} imported, ${result.skipped} skipped, ${result.unmatched.length} unmatched`);
       setSetting('last_import_time', new Date().toISOString());
       setSetting('last_import_result', JSON.stringify(result));
+      await postDailyFanUpdate(client);
     } catch (err) {
       console.error(`Auto-import [${source}] failed:`, err);
     }
@@ -143,6 +147,16 @@ client.once('ready', async () => {
   cron.schedule('0 */6 * * *', async () => {
     await doAutoImport('cron-6h');
   }, { timezone: 'Asia/Tokyo' });
+
+  // Daily 12:00 JST — Streak alert DMs for at-risk members
+  cron.schedule('0 12 * * *', async () => {
+    console.log('Cron: streak alert DMs (daily 12:00 JST)');
+    try {
+      await sendStreakAlertDMs(client);
+    } catch (err) {
+      console.error('Cron: streak alert DMs failed:', err);
+    }
+  }, { timezone: 'Asia/Tokyo' });
 });
 
 client.on('interactionCreate', async interaction => {
@@ -161,6 +175,34 @@ client.on('interactionCreate', async interaction => {
     } else {
       await interaction.reply(reply).catch(() => {});
     }
+  }
+});
+
+client.on('guildMemberUpdate', async (oldMember, newMember) => {
+  // Check if the member just gained the Guild Member role
+  const guildMemberRoleId = getSetting('role_guild_member');
+  if (!guildMemberRoleId) return;
+  if (oldMember.roles.cache.has(guildMemberRoleId)) return;
+  if (!newMember.roles.cache.has(guildMemberRoleId)) return;
+
+  const dmMsg = [
+    '👋 **Welcome to Kabayo!**',
+    '',
+    "You've been added as a Guild Member — great to have you!",
+    '',
+    "Here's how to get started:",
+    '• Use `/link-profile uma-name:YourTrainerName` to link your uma.moe account',
+    '• Use `/dm-warnings enabled:true` to receive personal push-day reminders',
+    '• Use `/me` to view your personal weekly summary',
+    '• Use `/help` to see all available commands',
+    '',
+    "Good luck and let's keep that Top 500 spot! 🏇",
+  ].join('\n');
+
+  try {
+    await newMember.send({ content: dmMsg });
+  } catch (_) {
+    // Member has DMs disabled — skip silently
   }
 });
 

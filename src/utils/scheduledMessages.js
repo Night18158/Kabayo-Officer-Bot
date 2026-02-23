@@ -10,6 +10,25 @@ const {
 const { formatFans } = require('./formatters');
 const { getTimeUntilReset } = require('./countdown');
 
+/** Rotating motivational messages used across scheduled posts. */
+const MOTIVATIONAL_MESSAGES = [
+  "Every run counts — let's keep pushing! 🏇",
+  "Small gains add up to big results. You've got this! 💪",
+  "Top 500 stays Top 500 because of team effort. Let's go! 🔥",
+  "One more training session can make the difference! ⭐",
+  "The grind pays off — stay consistent! 🎯",
+  "Your effort today keeps the guild strong tomorrow! 🛡️",
+  "Together we rise — let's give it our all! 🤝",
+  "Champions are made in the daily grind. Keep it up! 🏆",
+  "A little push now, big rewards later! 🚀",
+  "We believe in you — let's finish strong! 🌟",
+];
+
+/** Pick a random motivational message. */
+function randomMotivation() {
+  return MOTIVATIONAL_MESSAGES[Math.floor(Math.random() * MOTIVATIONAL_MESSAGES.length)];
+}
+
 /**
  * Attempt to send a message to a channel by ID.
  * Silently skips if channelId is not configured or channel is unreachable.
@@ -73,6 +92,22 @@ async function postNewWeekMessage(client) {
 }
 
 /**
+ * Build top 3 performers lines for use in messages.
+ * getAllMembers() returns members sorted by weekly_fans_current DESC.
+ * @returns {string[]} Array of lines to spread into a message array
+ */
+function getTop3Lines() {
+  const top3 = getAllMembers().filter(m => m.weekly_fans_current > 0).slice(0, 3);
+  if (top3.length === 0) return [];
+  const lines = ['🏆 **Top 3 this week:**'];
+  top3.forEach((m, i) => {
+    lines.push(`  ${i + 1}. **${m.in_game_name}** — ${formatFans(m.weekly_fans_current)}`);
+  });
+  lines.push('');
+  return lines;
+}
+
+/**
  * Post the midweek checkpoint in channel_tracker and DM at-risk members.
  * @param {import('discord.js').Client} client
  */
@@ -94,6 +129,7 @@ async function postMidweekCheckpoint(client) {
     '',
     `⏳ Time remaining: ${countdown} until weekly reset`,
     '',
+    ...getTop3Lines(),
     'Still plenty of time — small daily runs make the difference! 💪',
   ].join('\n');
   await trySend(client, channelId, msg);
@@ -138,8 +174,9 @@ async function postMidweekCheckpoint(client) {
  */
 async function postPushDayMorning(client) {
   const channelId = getSetting('channel_push');
-  const { avg } = calcStats();
+  const { avg, green, yellow, red, noSub, memberCount } = calcStats();
   const { formatted: countdown } = getTimeUntilReset();
+  const needGreen = memberCount - green;
 
   const msg = [
     '🔥 **KABAYO FAN PUSH DAY** 🔥',
@@ -149,10 +186,12 @@ async function postPushDayMorning(client) {
     '',
     `⏳ Time remaining: ${countdown} until weekly reset`,
     '',
+    `📊 ${needGreen} member(s) still need to reach GREEN`,
+    '',
     'Today is our team push day.',
     'Even +300K helps the guild massively.',
     '',
-    "Let's finish strong! 🏇",
+    randomMotivation(),
   ].join('\n');
   await trySend(client, channelId, msg);
 }
@@ -177,7 +216,8 @@ async function postPushDayEvening(client) {
     `🔴 ${red} still need a push`,
     `📭 ${noSub} haven't submitted yet`,
     '',
-    'Every submission counts. Let\'s go! 💪',
+    ...getTop3Lines(),
+    randomMotivation(),
   ].join('\n');
   await trySend(client, channelId, msg);
 }
@@ -264,6 +304,61 @@ async function sendWeekCloseWarningDMs(client) {
   }
 }
 
+/**
+ * Post a daily fan update to channel_push with guild average, breakdown,
+ * top 3 performers, time until reset, and a random motivational message.
+ * @param {import('discord.js').Client} client
+ */
+async function postDailyFanUpdate(client) {
+  const channelId = getSetting('channel_push');
+  const { avg, green, yellow, red, noSub } = calcStats();
+  const { formatted: countdown } = getTimeUntilReset();
+
+  const msg = [
+    '📈 **Daily Fan Update**',
+    '',
+    `Guild Average: ${formatFans(Math.round(avg))}`,
+    '',
+    `🟢 GREEN: ${green}  🟡 YELLOW: ${yellow}  🔴 RED: ${red}  📭 No submission: ${noSub}`,
+    '',
+    ...getTop3Lines(),
+    `⏳ Time until weekly reset: ${countdown}`,
+    '',
+    randomMotivation(),
+  ].join('\n');
+  await trySend(client, channelId, msg);
+}
+
+/**
+ * Send streak-at-risk DMs to members who have a target streak ≥ 3 weeks
+ * but are currently YELLOW or RED and have DM warnings enabled.
+ * @param {import('discord.js').Client} client
+ */
+async function sendStreakAlertDMs(client) {
+  const dmEnabled = getMembersWithDmEnabled();
+
+  for (const m of dmEnabled) {
+    if (m.streak_target_weeks < 3) continue;
+    if (m.weekly_status !== 'YELLOW' && m.weekly_status !== 'RED') continue;
+
+    const dmMsg = [
+      '⚠️ **Streak at Risk!**',
+      '',
+      `You currently have a **${m.streak_target_weeks}-week** target streak.`,
+      `This week you're at **${m.weekly_status}** — your streak could break!`,
+      '',
+      "Push a bit more to protect your streak. You've got this! 🏇",
+    ].join('\n');
+
+    try {
+      const user = await client.users.fetch(m.discord_user_id);
+      await user.send({ content: dmMsg });
+    } catch (_) {
+      // User has DMs disabled — skip silently
+    }
+  }
+}
+
 module.exports = {
   trySend,
   postNewWeekMessage,
@@ -272,4 +367,6 @@ module.exports = {
   postPushDayEvening,
   sendFinalPushDMs,
   sendWeekCloseWarningDMs,
+  postDailyFanUpdate,
+  sendStreakAlertDMs,
 };
