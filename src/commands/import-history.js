@@ -130,12 +130,15 @@ function calcWeeklyFans(monthDataMap, trainerName, monday, sunday) {
     weeklyFans = sunValue - monValue;
   } else {
     // Cross-month: fans in prev-month part + fans in curr-month part.
-    // next_month_start from the prev month = cumulative total at end of that month.
-    // fans_prev_part  = next_month_start - monValue
-    // fans_curr_part  = sunValue  (daily_fans resets to 0 at month start)
+    // daily_fans is always cumulative and never resets at month boundaries.
+    // fans_prev_part  = nextMonthStart - monValue
+    // fans_curr_part  = sunValue - firstDayOfSundayMonth  (first day of new month)
     const nextMonthStart = getNextMonthStart(monthDataMap, trainerName, monday);
     if (nextMonthStart === null) return null;
-    weeklyFans = (nextMonthStart - monValue) + sunValue;
+    const firstOfSundayMonth = new Date(Date.UTC(sunday.getUTCFullYear(), sunday.getUTCMonth(), 1));
+    const firstDayValue = getDailyFansValue(monthDataMap, trainerName, firstOfSundayMonth);
+    if (firstDayValue === null || firstDayValue <= 0) return null;
+    weeklyFans = (nextMonthStart - monValue) + (sunValue - firstDayValue);
   }
 
   // Negative result means the member transferred in during this week — skip
