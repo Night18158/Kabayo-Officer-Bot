@@ -1,11 +1,11 @@
-const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder } = require('discord.js');
 const { setSetting } = require('../database');
+const { isOfficer, officerOnlyMessage } = require('../utils/permissions');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('set-roles')
     .setDescription('(Officers) Configure the roles assigned by the bot.')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addRoleOption(opt =>
       opt.setName('mvp').setDescription('Role awarded to the weekly MVP').setRequired(false)
     )
@@ -20,6 +20,11 @@ module.exports = {
     ),
 
   async execute(interaction) {
+    const member = await interaction.guild.members.fetch(interaction.user.id);
+    if (!isOfficer(member)) {
+      return interaction.reply({ content: officerOnlyMessage(), ephemeral: true });
+    }
+
     const mapping = {
       mvp:   'role_mvp',
       elite: 'role_elite',

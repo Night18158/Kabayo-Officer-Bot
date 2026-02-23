@@ -1,13 +1,13 @@
-const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder } = require('discord.js');
 const { getAllMembers, emergencyReset } = require('../database');
 const { closeWeek } = require('../utils/weekClose');
 const { postNewWeekMessage } = require('../utils/scheduledMessages');
+const { isOfficer, officerOnlyMessage } = require('../utils/permissions');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('week')
     .setDescription('(Officers) Week management commands.')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand(sub =>
       sub
         .setName('start')
@@ -25,6 +25,11 @@ module.exports = {
     ),
 
   async execute(interaction) {
+    const member = await interaction.guild.members.fetch(interaction.user.id);
+    if (!isOfficer(member)) {
+      return interaction.reply({ content: officerOnlyMessage(), ephemeral: true });
+    }
+
     const sub = interaction.options.getSubcommand();
 
     if (sub === 'start') {

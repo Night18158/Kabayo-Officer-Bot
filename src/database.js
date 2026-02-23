@@ -54,6 +54,13 @@ try {
   // Column already exists — safe to ignore
 }
 
+// Migration: add fan_source column if it doesn't exist
+try {
+  db.exec("ALTER TABLE members ADD COLUMN fan_source TEXT DEFAULT 'none'");
+} catch (_) {
+  // Column already exists — safe to ignore
+}
+
 // Insert default settings if not already present
 const defaultSettings = {
   min_fans: '4200000',
@@ -159,16 +166,18 @@ function getMembersWithDmEnabled() {
  * @param {string} discordUserId
  * @param {number} fans
  * @param {string} status
+ * @param {string} [fanSource='manual']
  */
-function submitFans(discordUserId, fans, status) {
+function submitFans(discordUserId, fans, status, fanSource = 'manual') {
   const now = new Date().toISOString();
   db.prepare(`
     UPDATE members
     SET weekly_fans_current = ?,
         weekly_status = ?,
-        last_submission_timestamp = ?
+        last_submission_timestamp = ?,
+        fan_source = ?
     WHERE discord_user_id = ?
-  `).run(fans, status, now, discordUserId);
+  `).run(fans, status, now, fanSource, discordUserId);
 }
 
 /**
