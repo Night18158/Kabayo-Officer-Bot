@@ -38,7 +38,7 @@ A Discord bot for managing weekly fan performance tracking in an Uma Musume: Pre
 
 ### Prerequisites
 
-- **Node.js 20+**
+- **Node.js 18+**
 - A Discord bot token (from the [Discord Developer Portal](https://discord.com/developers/applications))
 - Your Discord server's Guild ID and the bot's Client ID
 - Your uma.moe circle ID (from your circle's uma.moe URL)
@@ -161,7 +161,7 @@ All times are JST (UTC+9).
 
 | Component | Technology |
 |-----------|-----------|
-| Runtime | Node.js 20+ |
+| Runtime | Node.js 18+ |
 | Discord API | discord.js v14 |
 | Database | better-sqlite3 (SQLite) |
 | Scheduling | node-cron |
