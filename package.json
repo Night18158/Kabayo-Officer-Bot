@@ -1,0 +1,21 @@
+{
+  "name": "kabayo-officer-bot",
+  "version": "1.0.0",
+  "description": "Discord bot for tracking weekly fan performance in Uma Musume: Pretty Derby guild",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "overrides": {
+    "undici": ">=6.23.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.5",
+    "node-cron": "^3.0.3"
+  }
+}
