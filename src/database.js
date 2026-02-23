@@ -574,6 +574,62 @@ function getHallOfFame() {
 }
 
 /**
+ * Check whether a weekly_history entry already exists for a member + week label.
+ * @param {string} discordUserId
+ * @param {string} weekLabel  e.g. "2026-W05"
+ * @returns {boolean}
+ */
+function weekHistoryExists(discordUserId, weekLabel) {
+  const row = db.prepare(
+    'SELECT id FROM weekly_history WHERE discord_user_id = ? AND week_label = ?'
+  ).get(discordUserId, weekLabel);
+  return !!row;
+}
+
+/**
+ * Recalculate streak_target_weeks, streak_elite_weeks, and consecutive_red_weeks
+ * for a member by scanning their weekly_history from most-recent to oldest.
+ * @param {string} discordUserId
+ */
+function recalculateStreaksFromHistory(discordUserId) {
+  const history = db.prepare(
+    'SELECT fans, status FROM weekly_history WHERE discord_user_id = ? ORDER BY week_label DESC'
+  ).all(discordUserId);
+
+  const thresholds = getThresholds();
+  let streakTarget = 0;
+  let streakElite = 0;
+  let streakRed = 0;
+  let targetBroken = false;
+  let eliteBroken = false;
+  let redBroken = false;
+
+  for (const week of history) {
+    if (!targetBroken) {
+      if (week.fans >= thresholds.streak_target_threshold) streakTarget++;
+      else targetBroken = true;
+    }
+    if (!eliteBroken) {
+      if (week.fans >= thresholds.elite_fans) streakElite++;
+      else eliteBroken = true;
+    }
+    if (!redBroken) {
+      if (week.status === 'RED') streakRed++;
+      else redBroken = true;
+    }
+    if (targetBroken && eliteBroken && redBroken) break;
+  }
+
+  db.prepare(`
+    UPDATE members
+    SET streak_target_weeks   = ?,
+        streak_elite_weeks    = ?,
+        consecutive_red_weeks = ?
+    WHERE discord_user_id = ?
+  `).run(streakTarget, streakElite, streakRed, discordUserId);
+}
+
+/**
  * Get the all-time best fans for a member from weekly history.
  * @param {string} discordUserId
  * @returns {number}
@@ -628,4 +684,6 @@ module.exports = {
   getHallOfFame,
   getMemberAllTimeBest,
   getMemberGreenCount,
+  weekHistoryExists,
+  recalculateStreaksFromHistory,
 };
