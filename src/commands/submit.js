@@ -1,7 +1,8 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
-const { getMember, submitFans, addWeeklyHistory, getThresholds, getCurrentWeekLabel } = require('../database');
+const { getMember, submitFans, addWeeklyHistory, getThresholds, getCurrentWeekLabel, getSetting } = require('../database');
 const { calculateStatus, getStatusEmoji, getStatusLabel, fansNeededForNext } = require('../utils/statusLogic');
 const { formatFans, formatNumber } = require('../utils/formatters');
+const { trySend } = require('../utils/scheduledMessages');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -78,5 +79,15 @@ module.exports = {
       ].join('\n'),
       ephemeral: true,
     });
+
+    // Live feed: post noteworthy submissions to channel_tracker
+    const thresholdsCheck = getThresholds();
+    if (fans >= thresholdsCheck.elite_fans) {
+      const trackerChannel = getSetting('channel_tracker');
+      await trySend(interaction.client, trackerChannel, `⚡ **${dbMember.in_game_name}** just submitted **${formatFans(fans)}** — Elite performance!`);
+    } else if (fans >= thresholdsCheck.target_fans) {
+      const trackerChannel = getSetting('channel_tracker');
+      await trySend(interaction.client, trackerChannel, `🟢 **${dbMember.in_game_name}** just hit GREEN with **${formatFans(fans)}**!`);
+    }
   },
 };
