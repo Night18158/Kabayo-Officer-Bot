@@ -1,9 +1,8 @@
 const { SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
 const path = require('path');
 const fs = require('fs');
-const { DB_PATH, BACKUP_DIR } = require('../database');
+const { db, DB_PATH, BACKUP_DIR, getCurrentWeekLabel } = require('../database');
 const { isOfficer, officerOnlyMessage } = require('../utils/permissions');
-const { getCurrentWeekLabel } = require('../database');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -26,13 +25,21 @@ module.exports = {
     await interaction.deferReply({ ephemeral: true });
 
     try {
+      // Force WAL checkpoint so the .db file has all data
+      try {
+        db.pragma('wal_checkpoint(TRUNCATE)');
+      } catch (e) {
+        console.warn('WAL checkpoint warning:', e.message);
+      }
+
       // Create a timestamped copy in backups dir
       const weekLabel = getCurrentWeekLabel();
       const backupName = `kabayo-${weekLabel}-manual.db`;
       const backupPath = path.join(BACKUP_DIR, backupName);
       fs.copyFileSync(DB_PATH, backupPath);
 
-      const attachment = new AttachmentBuilder(DB_PATH, { name: 'kabayo.db' });
+      // Send the backup copy (not the live DB which may be locked)
+      const attachment = new AttachmentBuilder(backupPath, { name: 'kabayo.db' });
 
       await interaction.editReply({
         content: `✅ Database backup ready (Week: ${weekLabel})`,

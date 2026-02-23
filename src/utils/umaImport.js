@@ -46,7 +46,11 @@ function calculateWeeklyFans(dailyFans, weekStartDay, currentDay) {
     return 0;
   }
 
-  return dailyFans[endIndex] - dailyFans[startIndex];
+  // If start equals end (same day), no fans gained yet this week
+  if (startIndex === endIndex) return 0;
+
+  const result = dailyFans[endIndex] - dailyFans[startIndex];
+  return result < 0 ? 0 : result;
 }
 
 /**
@@ -61,22 +65,21 @@ function calculateWeeklyFans(dailyFans, weekStartDay, currentDay) {
 async function runAutoImport() {
   const circleId = getSetting('uma_circle_id') || DEFAULT_CIRCLE_ID;
   const now = new Date();
-  const jstNow = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
-  const year = jstNow.getFullYear();
-  const month = jstNow.getMonth() + 1;
-  const currentDay = jstNow.getDate();
+
+  // Calculate JST time reliably (UTC+9)
+  const jstOffset = 9 * 60 * 60 * 1000;
+  const jstNow = new Date(now.getTime() + jstOffset);
+  const year = jstNow.getUTCFullYear();
+  const month = jstNow.getUTCMonth() + 1;
+  const currentDay = jstNow.getUTCDate();
 
   // Calculate week start day (last Monday in JST)
-  const dayOfWeek = jstNow.getDay();
+  const dayOfWeek = jstNow.getUTCDay();
   const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-  const weekStartDate = new Date(jstNow);
-  weekStartDate.setDate(jstNow.getDate() - daysSinceMonday);
-  let weekStartDay = weekStartDate.getDate();
+  let weekStartDay = currentDay - daysSinceMonday;
 
-  // Handle month boundary: if week started in previous month,
-  // use day 1 of current month as approximation.
-  // Limitation: cross-month weekly fan calculation is not supported.
-  if (weekStartDay > currentDay) {
+  // Handle month boundary: if week started in previous month, use day 1
+  if (weekStartDay < 1) {
     weekStartDay = 1;
   }
 
