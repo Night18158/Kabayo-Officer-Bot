@@ -1,8 +1,10 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { getAllMembers, emergencyReset } = require('../database');
+const { getAllMembers, emergencyReset, getCurrentWeekLabel } = require('../database');
 const { closeWeek } = require('../utils/weekClose');
 const { postNewWeekMessage } = require('../utils/scheduledMessages');
 const { isOfficer, officerOnlyMessage } = require('../utils/permissions');
+const { getTimeUntilReset, getNextScheduledEvent } = require('../utils/countdown');
+const { formatFans } = require('../utils/formatters');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -22,15 +24,63 @@ module.exports = {
       sub
         .setName('reset')
         .setDescription('Reset all weekly fans to 0 without generating a report (emergency/testing).')
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('status')
+        .setDescription('View current week overview and countdown to reset.')
     ),
 
   async execute(interaction) {
+    const sub = interaction.options.getSubcommand();
+
+    if (sub === 'status') {
+      const members = getAllMembers();
+      const weekLabel = getCurrentWeekLabel();
+      const countdown = getTimeUntilReset();
+      const nextEvent = getNextScheduledEvent();
+
+      const withFans = members.filter(m => m.weekly_fans_current > 0);
+      const guildAvg = withFans.length > 0
+        ? Math.round(withFans.reduce((sum, m) => sum + m.weekly_fans_current, 0) / withFans.length)
+        : 0;
+
+      const green  = members.filter(m => m.weekly_status === 'GREEN').length;
+      const yellow = members.filter(m => m.weekly_status === 'YELLOW').length;
+      const red    = members.filter(m => m.weekly_status === 'RED' && m.weekly_fans_current > 0).length;
+      const noData = members.filter(m => m.weekly_fans_current === 0).length;
+
+      const topMember = members[0] ?? null;
+      const topLine = topMember && topMember.weekly_fans_current > 0
+        ? `\n🏆 **Current Top:** ${topMember.in_game_name} (${formatFans(topMember.weekly_fans_current)})`
+        : '';
+
+      const content = [
+        '📅 **Week Status**',
+        '',
+        `**Week:** ${weekLabel}`,
+        `⏳ **Time remaining:** ${countdown.formatted} until weekly reset`,
+        '',
+        '📊 **Guild Overview:**',
+        `   Members: ${members.length} registered`,
+        `   Guild Average: ${formatFans(guildAvg)}`,
+        '',
+        `   🟢 ${green} GREEN (target met)`,
+        `   🟡 ${yellow} YELLOW (on track)`,
+        `   🔴 ${red} RED (needs attention)`,
+        `   📭 ${noData} no data yet`,
+        topLine,
+        '',
+        `⏰ **Next event:** ${nextEvent.name} (~${nextEvent.formatted})`,
+      ].join('\n');
+
+      return interaction.reply({ content, ephemeral: true });
+    }
+
     const member = await interaction.guild.members.fetch(interaction.user.id);
     if (!isOfficer(member)) {
       return interaction.reply({ content: officerOnlyMessage(), ephemeral: true });
     }
-
-    const sub = interaction.options.getSubcommand();
 
     if (sub === 'start') {
       await interaction.deferReply({ ephemeral: true });

@@ -61,6 +61,13 @@ try {
   // Column already exists — safe to ignore
 }
 
+// Migration: add uma_trainer_name column if it doesn't exist
+try {
+  db.exec('ALTER TABLE members ADD COLUMN uma_trainer_name TEXT DEFAULT NULL');
+} catch (_) {
+  // Column already exists — safe to ignore
+}
+
 // Insert default settings if not already present
 const defaultSettings = {
   min_fans: '4200000',
@@ -68,7 +75,7 @@ const defaultSettings = {
   elite_fans: '5500000',
   streak_target_threshold: '5000000',
   week_start_day: '1',
-  timezone: 'Europe/Madrid',
+  timezone: 'Asia/Tokyo',
 };
 
 const insertSetting = db.prepare(

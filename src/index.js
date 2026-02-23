@@ -14,6 +14,7 @@ const {
   postPushDayEvening,
   sendFinalPushDMs,
 } = require('./utils/scheduledMessages');
+const { runAutoImport } = require('./utils/umaImport');
 
 // --- Load commands ---
 const commandsPath = path.join(__dirname, 'commands');
@@ -59,65 +60,79 @@ client.once('ready', async () => {
     setSetting('guild_id', config.guildId);
   }
 
-  // Schedule automatic week close every Sunday at 23:00 Europe/Madrid
-  cron.schedule('0 23 * * 0', async () => {
-    console.log('Cron: running automatic week close (Sunday 23:00 Europe/Madrid)...');
+  // Monday 03:55 JST — Week close + report + roles (5 min before Uma reset)
+  cron.schedule('55 3 * * 1', async () => {
+    console.log('Cron: running automatic week close (Monday 03:55 JST)...');
     try {
       await closeWeek(client);
     } catch (err) {
       console.error('Cron: week close failed:', err);
     }
-  }, { timezone: 'Europe/Madrid' });
+  }, { timezone: 'Asia/Tokyo' });
 
-  // Monday 00:00 — Auto week start
-  cron.schedule('0 0 * * 1', async () => {
-    console.log('Cron: new week started (Monday 00:00 Europe/Madrid)');
+  // Monday 04:05 JST — New week announcement (5 min after Uma reset)
+  cron.schedule('5 4 * * 1', async () => {
+    console.log('Cron: new week started (Monday 04:05 JST)');
     try {
       await postNewWeekMessage(client);
     } catch (err) {
       console.error('Cron: week start message failed:', err);
     }
-  }, { timezone: 'Europe/Madrid' });
+  }, { timezone: 'Asia/Tokyo' });
 
-  // Thursday 20:00 — Midweek checkpoint
-  cron.schedule('0 20 * * 4', async () => {
-    console.log('Cron: midweek checkpoint (Thursday 20:00 Europe/Madrid)');
+  // Thursday 12:00 JST — Midweek checkpoint + DMs
+  cron.schedule('0 12 * * 4', async () => {
+    console.log('Cron: midweek checkpoint (Thursday 12:00 JST)');
     try {
       await postMidweekCheckpoint(client);
     } catch (err) {
       console.error('Cron: midweek checkpoint failed:', err);
     }
-  }, { timezone: 'Europe/Madrid' });
+  }, { timezone: 'Asia/Tokyo' });
 
-  // Sunday 10:00 — Fan Push Day morning
+  // Sunday 10:00 JST — Push Day morning
   cron.schedule('0 10 * * 0', async () => {
-    console.log('Cron: push day morning (Sunday 10:00 Europe/Madrid)');
+    console.log('Cron: push day morning (Sunday 10:00 JST)');
     try {
       await postPushDayMorning(client);
     } catch (err) {
       console.error('Cron: push day morning failed:', err);
     }
-  }, { timezone: 'Europe/Madrid' });
+  }, { timezone: 'Asia/Tokyo' });
 
-  // Sunday 18:00 — Fan Push Day evening
+  // Sunday 18:00 JST — Push Day evening
   cron.schedule('0 18 * * 0', async () => {
-    console.log('Cron: push day evening (Sunday 18:00 Europe/Madrid)');
+    console.log('Cron: push day evening (Sunday 18:00 JST)');
     try {
       await postPushDayEvening(client);
     } catch (err) {
       console.error('Cron: push day evening failed:', err);
     }
-  }, { timezone: 'Europe/Madrid' });
+  }, { timezone: 'Asia/Tokyo' });
 
-  // Sunday 22:00 — Final push DMs
-  cron.schedule('0 22 * * 0', async () => {
-    console.log('Cron: final push DMs (Sunday 22:00 Europe/Madrid)');
+  // Monday 02:00 JST — Final push DMs (~2h before reset)
+  cron.schedule('0 2 * * 1', async () => {
+    console.log('Cron: final push DMs (Monday 02:00 JST)');
     try {
       await sendFinalPushDMs(client);
     } catch (err) {
       console.error('Cron: final push DMs failed:', err);
     }
-  }, { timezone: 'Europe/Madrid' });
+  }, { timezone: 'Asia/Tokyo' });
+
+  // Daily at 07:00 JST — Auto-import from uma.moe (~3h after daily Uma reset at 04:00)
+  cron.schedule('0 7 * * *', async () => {
+    console.log('Cron: running daily auto-import from uma.moe');
+    try {
+      const result = await runAutoImport();
+      console.log(`Auto-import: ${result.imported} imported, ${result.skipped} skipped, ${result.unmatched.length} unmatched`);
+      // Store timestamp in UTC ISO format; import-status converts to JST for display
+      setSetting('last_import_time', new Date().toISOString());
+      setSetting('last_import_result', JSON.stringify(result));
+    } catch (err) {
+      console.error('Auto-import failed:', err);
+    }
+  }, { timezone: 'Asia/Tokyo' });
 });
 
 client.on('interactionCreate', async interaction => {
