@@ -1,5 +1,5 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { getAllMembers, getThresholds } = require('../database');
+const { getAllMembers, getThresholds, isOnVacation } = require('../database');
 const { getStatusEmoji } = require('../utils/statusLogic');
 const { formatFans } = require('../utils/formatters');
 
@@ -65,10 +65,12 @@ module.exports = {
     const title = `📊 **${sortLabel} ${page.length} — Weekly Fan Leaderboard**`;
 
     const rows = page.map((m, i) => {
-      const emoji = getStatusEmoji(m.weekly_status);
+      const onVacation = isOnVacation(m);
+      const emoji = onVacation ? '🏖️' : getStatusEmoji(m.weekly_status);
       const rank = sort === 'top' ? i + 1 : members.length - page.length + i + 1;
       const fans = formatFans(m.weekly_fans_current);
-      return `\`${String(rank).padStart(2, ' ')}.\` ${emoji} **${m.in_game_name}** — ${fans}`;
+      const vacationTag = onVacation ? ' *(vacation)*' : '';
+      return `\`${String(rank).padStart(2, ' ')}.\` ${emoji} **${m.in_game_name}**${vacationTag} — ${fans}`;
     });
 
     await interaction.reply({

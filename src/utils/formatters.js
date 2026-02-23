@@ -26,4 +26,18 @@ function formatNumber(number) {
   return number.toLocaleString('en-US');
 }
 
-module.exports = { formatFans, formatNumber };
+/**
+ * Format a Date (or ISO string) to a human-readable JST timestamp.
+ * e.g. "Feb 23, 2026, 10:30 AM"
+ * @param {Date|string} date
+ * @returns {string}
+ */
+function formatJSTTimestamp(date) {
+  return new Date(date).toLocaleString('en-US', {
+    timeZone: 'Asia/Tokyo',
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+}
+
+module.exports = { formatFans, formatNumber, formatJSTTimestamp };

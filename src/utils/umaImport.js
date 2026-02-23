@@ -4,6 +4,7 @@ const {
   getSetting,
   setSetting,
   submitFans,
+  autoRegisterMember,
 } = require('../database');
 const { calculateStatus } = require('./statusLogic');
 
@@ -17,7 +18,7 @@ const DEFAULT_CIRCLE_ID = '303280917';
  * @returns {Promise<Object>}
  */
 async function fetchCircleData(circleId, year, month) {
-  const url = `https://uma.moe/circle/circle_id=${circleId}&year=${year}&month=${String(month).padStart(2, '0')}`;
+  const url = `https://uma.moe/api/v4/circles?circle_id=${circleId}&year=${year}&month=${month}`;
   const response = await fetch(url);
   if (!response.ok) throw new Error(`uma.moe API returned ${response.status}`);
   return response.json();
@@ -52,9 +53,10 @@ function calculateWeeklyFans(dailyFans, weekStartDay, currentDay) {
  * Run the full auto-import process:
  * 1. Fetch data from uma.moe
  * 2. Match trainer_name with bot's in_game_name or uma_trainer_name
- * 3. Calculate weekly fans for each member
- * 4. Update members who haven't been manually submitted
- * @returns {Promise<{ imported: number, skipped: number, unmatched: string[], errors: string[], total: number }>}
+ * 3. Auto-register unmatched members
+ * 4. Calculate weekly fans for each member
+ * 5. Update members only if new fan count is higher than current
+ * @returns {Promise<{ imported: number, skipped: number, unmatched: string[], errors: string[], total: number, autoRegistered: number }>}
  */
 async function runAutoImport() {
   const circleId = getSetting('uma_circle_id') || DEFAULT_CIRCLE_ID;
@@ -83,25 +85,27 @@ async function runAutoImport() {
 
   let imported = 0;
   let skipped = 0;
+  let autoRegistered = 0;
   const unmatched = [];
   const errors = [];
 
   for (const umaMember of data.members) {
-    const dbMember = allMembers.find(m =>
+    let dbMember = allMembers.find(m =>
       (m.uma_trainer_name &&
         m.uma_trainer_name.toLowerCase() === umaMember.trainer_name.toLowerCase()) ||
       m.in_game_name.toLowerCase() === umaMember.trainer_name.toLowerCase()
     );
 
+    // Auto-register if no match found
     if (!dbMember) {
-      unmatched.push(umaMember.trainer_name);
-      continue;
-    }
-
-    // Skip if member was manually submitted this week
-    if (dbMember.fan_source === 'manual') {
-      skipped++;
-      continue;
+      try {
+        dbMember = autoRegisterMember(umaMember.trainer_name);
+        autoRegistered++;
+      } catch (e) {
+        unmatched.push(umaMember.trainer_name);
+        errors.push(`Auto-register ${umaMember.trainer_name}: ${e.message}`);
+        continue;
+      }
     }
 
     try {
@@ -110,18 +114,21 @@ async function runAutoImport() {
         weekStartDay,
         currentDay
       );
-      if (weeklyFans >= 0) {
+      // Only update if new value is higher than what's currently stored
+      if (weeklyFans > dbMember.weekly_fans_current) {
         const thresholds = getThresholds();
         const status = calculateStatus(weeklyFans, thresholds);
         submitFans(dbMember.discord_user_id, weeklyFans, status, 'auto');
         imported++;
+      } else {
+        skipped++;
       }
     } catch (e) {
       errors.push(`${umaMember.trainer_name}: ${e.message}`);
     }
   }
 
-  return { imported, skipped, unmatched, errors, total: data.members.length };
+  return { imported, skipped, unmatched, errors, total: data.members.length, autoRegistered };
 }
 
 module.exports = { fetchCircleData, calculateWeeklyFans, runAutoImport, DEFAULT_CIRCLE_ID };

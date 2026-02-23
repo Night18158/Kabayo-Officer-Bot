@@ -7,6 +7,12 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
+// Ensure backups directory exists
+const BACKUP_DIR = path.join(DATA_DIR, 'backups');
+if (!fs.existsSync(BACKUP_DIR)) {
+  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+}
+
 const DB_PATH = path.join(DATA_DIR, 'kabayo.db');
 const db = new Database(DB_PATH);
 
@@ -45,6 +51,14 @@ db.exec(`
     status          TEXT,
     created_at      TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS member_notes (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    discord_user_id TEXT NOT NULL,
+    note_text       TEXT NOT NULL,
+    written_by      TEXT NOT NULL,
+    created_at      TEXT NOT NULL
+  );
 `);
 
 // Migration: add dm_warnings_enabled column if it doesn't exist
@@ -64,6 +78,20 @@ try {
 // Migration: add uma_trainer_name column if it doesn't exist
 try {
   db.exec('ALTER TABLE members ADD COLUMN uma_trainer_name TEXT DEFAULT NULL');
+} catch (_) {
+  // Column already exists — safe to ignore
+}
+
+// Migration: add vacation_until column if it doesn't exist
+try {
+  db.exec('ALTER TABLE members ADD COLUMN vacation_until TEXT DEFAULT NULL');
+} catch (_) {
+  // Column already exists — safe to ignore
+}
+
+// Migration: add vacation_reason column if it doesn't exist
+try {
+  db.exec('ALTER TABLE members ADD COLUMN vacation_reason TEXT DEFAULT NULL');
 } catch (_) {
   // Column already exists — safe to ignore
 }
@@ -324,14 +352,16 @@ function getMVP() {
 /**
  * Group members by consecutive red weeks for the officer summary.
  * Uses the CURRENT (post-reset) consecutive_red_weeks values.
+ * Members on active vacation are excluded.
  * @returns {{ firstWeek: Array, secondWeek: Array, thirdPlusWeek: Array }}
  */
 function getRedWeekSummary() {
   const all = db.prepare('SELECT * FROM members ORDER BY in_game_name ASC').all();
+  const active = all.filter(m => !isOnVacation(m));
   return {
-    firstWeek:     all.filter(m => m.consecutive_red_weeks === 1),
-    secondWeek:    all.filter(m => m.consecutive_red_weeks === 2),
-    thirdPlusWeek: all.filter(m => m.consecutive_red_weeks >= 3),
+    firstWeek:     active.filter(m => m.consecutive_red_weeks === 1),
+    secondWeek:    active.filter(m => m.consecutive_red_weeks === 2),
+    thirdPlusWeek: active.filter(m => m.consecutive_red_weeks >= 3),
   };
 }
 
@@ -343,8 +373,230 @@ function emergencyReset() {
   db.prepare(`UPDATE members SET weekly_fans_current = 0, weekly_status = 'RED'`).run();
 }
 
+/**
+ * Auto-register a member from uma.moe with a placeholder discord_user_id.
+ * Used when a trainer_name is found in uma.moe but has no match in the bot DB.
+ * @param {string} trainerName - The trainer name from uma.moe
+ * @returns {Object} The newly created or existing member row
+ */
+function autoRegisterMember(trainerName) {
+  const placeholder = `uma_${trainerName}`;
+  const existing = getMember(placeholder);
+  if (existing) return existing;
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT OR IGNORE INTO members (discord_user_id, in_game_name, uma_trainer_name, created_at)
+    VALUES (?, ?, ?, ?)
+  `).run(placeholder, trainerName, trainerName, now);
+  return getMember(placeholder);
+}
+
+/**
+ * Add a private officer note for a member.
+ * @param {string} discordUserId - Member's discord user ID
+ * @param {string} noteText - The note content
+ * @param {string} writtenBy - Officer's discord user ID
+ */
+function addNote(discordUserId, noteText, writtenBy) {
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO member_notes (discord_user_id, note_text, written_by, created_at)
+    VALUES (?, ?, ?, ?)
+  `).run(discordUserId, noteText, writtenBy, now);
+}
+
+/**
+ * Get all notes for a member.
+ * @param {string} discordUserId
+ * @returns {Array}
+ */
+function getNotes(discordUserId) {
+  return db.prepare(
+    'SELECT * FROM member_notes WHERE discord_user_id = ? ORDER BY created_at DESC'
+  ).all(discordUserId);
+}
+
+/**
+ * Set a member's vacation period.
+ * @param {string} discordUserId
+ * @param {string} vacationUntil - ISO date string when vacation expires
+ * @param {string} reason - Reason for vacation
+ */
+function setVacation(discordUserId, vacationUntil, reason) {
+  db.prepare('UPDATE members SET vacation_until = ?, vacation_reason = ? WHERE discord_user_id = ?')
+    .run(vacationUntil, reason, discordUserId);
+}
+
+/**
+ * Remove a member's vacation (end it early).
+ * @param {string} discordUserId
+ */
+function removeVacation(discordUserId) {
+  db.prepare('UPDATE members SET vacation_until = NULL, vacation_reason = NULL WHERE discord_user_id = ?')
+    .run(discordUserId);
+}
+
+/**
+ * Check if a member is currently on vacation.
+ * @param {Object} member - Member row from DB
+ * @returns {boolean}
+ */
+function isOnVacation(member) {
+  if (!member || !member.vacation_until) return false;
+  return new Date() < new Date(member.vacation_until);
+}
+
+/**
+ * Get global guild statistics from weekly_history.
+ * @returns {Object}
+ */
+function getGuildStats() {
+  const weekTotals = db.prepare(`
+    SELECT week_label, SUM(fans) as total, COUNT(*) as member_count
+    FROM weekly_history
+    GROUP BY week_label
+    ORDER BY week_label
+  `).all();
+
+  if (weekTotals.length === 0) {
+    return { avgPerWeek: 0, bestWeek: null, worstWeek: null, trend: '➡️', totalWeeks: 0 };
+  }
+
+  const avgPerWeek = weekTotals.reduce((sum, w) => sum + w.total, 0) / weekTotals.length;
+  const bestWeek = weekTotals.reduce((best, week) => week.total > best.total ? week : best, weekTotals[0]);
+  const worstWeek = weekTotals.reduce((worst, week) => week.total < worst.total ? week : worst, weekTotals[0]);
+
+  // Trend: compare last 4 weeks vs 4 before that
+  let trend = '➡️';
+  if (weekTotals.length >= 4) {
+    const recent = weekTotals.slice(-4).reduce((s, w) => s + w.total, 0) / 4;
+    const older  = weekTotals.slice(-8, -4);
+    if (older.length > 0) {
+      const olderAvg = older.reduce((s, w) => s + w.total, 0) / older.length;
+      if (recent > olderAvg * 1.02) trend = '↗️';
+      else if (recent < olderAvg * 0.98) trend = '↘️';
+    }
+  }
+
+  return { avgPerWeek, bestWeek, worstWeek, trend, totalWeeks: weekTotals.length };
+}
+
+/**
+ * Get individual member statistics from weekly_history.
+ * @param {string} discordUserId
+ * @returns {Object}
+ */
+function getMemberStats(discordUserId) {
+  const history = db.prepare(`
+    SELECT * FROM weekly_history WHERE discord_user_id = ? ORDER BY week_label
+  `).all(discordUserId);
+
+  if (history.length === 0) {
+    return { avg: 0, bestWeek: null, greenWeeks: 0, yellowWeeks: 0, redWeeks: 0, trend: '➡️', totalWeeks: 0 };
+  }
+
+  const avg = history.reduce((sum, w) => sum + w.fans, 0) / history.length;
+  const bestWeek = history.reduce((b, w) => w.fans > b.fans ? w : b, history[0]);
+  const greenWeeks  = history.filter(w => w.status === 'GREEN').length;
+  const yellowWeeks = history.filter(w => w.status === 'YELLOW').length;
+  const redWeeks    = history.filter(w => w.status === 'RED').length;
+
+  let trend = '➡️';
+  if (history.length >= 4) {
+    const recent = history.slice(-4).reduce((s, w) => s + w.fans, 0) / 4;
+    const older  = history.slice(-8, -4);
+    if (older.length > 0) {
+      const olderAvg = older.reduce((s, w) => s + w.fans, 0) / older.length;
+      if (recent > olderAvg * 1.02) trend = '↗️';
+      else if (recent < olderAvg * 0.98) trend = '↘️';
+    }
+  }
+
+  return { avg, bestWeek, greenWeeks, yellowWeeks, redWeeks, trend, totalWeeks: history.length, history };
+}
+
+/**
+ * Get hall of fame data.
+ * @returns {Object}
+ */
+function getHallOfFame() {
+  // Most weeks as GREEN
+  const mostGreen = db.prepare(`
+    SELECT m.discord_user_id, m.in_game_name, COUNT(*) as green_weeks
+    FROM weekly_history wh
+    JOIN members m ON m.discord_user_id = wh.discord_user_id
+    WHERE wh.status = 'GREEN'
+    GROUP BY wh.discord_user_id
+    ORDER BY green_weeks DESC
+    LIMIT 1
+  `).get();
+
+  // Highest single-week fans
+  const highestFans = db.prepare(`
+    SELECT m.discord_user_id, m.in_game_name, wh.fans, wh.week_label
+    FROM weekly_history wh
+    JOIN members m ON m.discord_user_id = wh.discord_user_id
+    ORDER BY wh.fans DESC
+    LIMIT 1
+  `).get();
+
+  // Most MVPs (member with highest fans per week)
+  const mvpCounts = db.prepare(`
+    SELECT m.discord_user_id, m.in_game_name, COUNT(*) as mvp_count
+    FROM weekly_history wh
+    JOIN members m ON m.discord_user_id = wh.discord_user_id
+    WHERE wh.fans = (
+      SELECT MAX(fans) FROM weekly_history WHERE week_label = wh.week_label
+    )
+    AND wh.fans > 0
+    GROUP BY wh.discord_user_id
+    ORDER BY mvp_count DESC
+    LIMIT 1
+  `).get();
+
+  // Longest target streak (use current streak_target_weeks as best available)
+  const longestTargetStreak = db.prepare(`
+    SELECT discord_user_id, in_game_name, streak_target_weeks
+    FROM members
+    ORDER BY streak_target_weeks DESC
+    LIMIT 1
+  `).get();
+
+  // Longest elite streak
+  const longestEliteStreak = db.prepare(`
+    SELECT discord_user_id, in_game_name, streak_elite_weeks
+    FROM members
+    ORDER BY streak_elite_weeks DESC
+    LIMIT 1
+  `).get();
+
+  return { mostGreen, highestFans, mvpCounts, longestTargetStreak, longestEliteStreak };
+}
+
+/**
+ * Get the all-time best fans for a member from weekly history.
+ * @param {string} discordUserId
+ * @returns {number}
+ */
+function getMemberAllTimeBest(discordUserId) {
+  const row = db.prepare('SELECT MAX(fans) as max_fans FROM weekly_history WHERE discord_user_id = ?').get(discordUserId);
+  return row ? (row.max_fans || 0) : 0;
+}
+
+/**
+ * Count how many times a member has achieved GREEN in history.
+ * @param {string} discordUserId
+ * @returns {number}
+ */
+function getMemberGreenCount(discordUserId) {
+  const row = db.prepare("SELECT COUNT(*) as cnt FROM weekly_history WHERE discord_user_id = ? AND status = 'GREEN'").get(discordUserId);
+  return row ? row.cnt : 0;
+}
+
 module.exports = {
   db,
+  DB_PATH,
+  BACKUP_DIR,
   getSettings,
   getThresholds,
   getMember,
@@ -365,4 +617,15 @@ module.exports = {
   getSeasonTotals,
   getMVP,
   getRedWeekSummary,
+  autoRegisterMember,
+  addNote,
+  getNotes,
+  setVacation,
+  removeVacation,
+  isOnVacation,
+  getGuildStats,
+  getMemberStats,
+  getHallOfFame,
+  getMemberAllTimeBest,
+  getMemberGreenCount,
 };
