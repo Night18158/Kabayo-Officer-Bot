@@ -65,15 +65,18 @@ client.once('ready', async () => {
 
   // Helper: run auto-import and persist results
   async function doAutoImport(source) {
-    console.log(`Auto-import [${source}]: running...`);
+    console.log(`Auto-import [${source}]: running at ${new Date().toISOString()}...`);
     try {
       const result = await runAutoImport();
-      console.log(`Auto-import [${source}]: ${result.imported} imported, ${result.skipped} skipped, ${result.unmatched.length} unmatched`);
+      console.log(`Auto-import [${source}]: imported=${result.imported}, skipped=${result.skipped}, unmatched=${result.unmatched.length}, errors=${result.errors.length}`);
+      if (result.errors.length > 0) {
+        console.error(`Auto-import [${source}] errors:`, result.errors);
+      }
       setSetting('last_import_time', new Date().toISOString());
       setSetting('last_import_result', JSON.stringify(result));
       await postDailyFanUpdate(client);
     } catch (err) {
-      console.error(`Auto-import [${source}] failed:`, err);
+      console.error(`Auto-import [${source}] FATAL:`, err.message, err.stack);
     }
   }
 
@@ -161,6 +164,16 @@ client.once('ready', async () => {
 
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
+
+  // Channel restriction check
+  const botChannel = getSetting('channel_bot_commands');
+  const exemptCommands = ['set-bot-channels', 'set-officer-roles', 'set-channels'];
+  if (botChannel && !exemptCommands.includes(interaction.commandName) && interaction.channelId !== botChannel) {
+    return interaction.reply({
+      content: `❌ Please use bot commands in <#${botChannel}>`,
+      ephemeral: true,
+    });
+  }
 
   const command = commands.get(interaction.commandName);
   if (!command) return;

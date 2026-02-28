@@ -89,11 +89,56 @@ function calculateWeeklyFans(dailyFans, year, month) {
 }
 
 /**
+ * Calculate weekly fans for a member, handling cross-month week boundaries.
+ * When the week's baseline Sunday falls in the previous month, combine data
+ * from both months using `next_month_start` as the bridge value.
+ * @param {number[]} currDailyFans - Current month's daily_fans array
+ * @param {number} currYear
+ * @param {number} currMonth - 1-indexed
+ * @param {number[]|null} prevDailyFans - Previous month's daily_fans array (or null)
+ * @param {number|null} nextMonthStart - Previous month's next_month_start bridge value
+ * @param {number} prevYear
+ * @param {number} prevMonth - 1-indexed
+ * @returns {number} Weekly fans gained
+ */
+function calculateCrossMonthWeeklyFans(currDailyFans, currYear, currMonth, prevDailyFans, nextMonthStart, prevYear, prevMonth) {
+  // Try current month calculation first
+  const currFans = calculateWeeklyFans(currDailyFans, currYear, currMonth);
+  if (currFans > 0 || !prevDailyFans) return currFans;
+
+  // Current month gave 0 — check if baseline falls in previous month
+  const currLastIdx = findLastDataIndex(currDailyFans);
+  const currBaseIdx = currLastIdx >= 0 ? findWeekBaseIndex(currYear, currMonth, currLastIdx) : -1;
+
+  // If base is in current month but still 0, just return 0
+  if (currBaseIdx >= 0) return 0;
+
+  // Baseline falls in previous month — try previous month alone
+  const prevFans = calculateWeeklyFans(prevDailyFans, prevYear, prevMonth);
+
+  // If next_month_start is available, try cross-month combination
+  if (nextMonthStart != null && nextMonthStart >= 0) {
+    const prevLastIdx = findLastDataIndex(prevDailyFans);
+    if (prevLastIdx >= 0) {
+      let prevBaseIdx = findWeekBaseIndex(prevYear, prevMonth, prevLastIdx);
+      if (prevBaseIdx < 0) prevBaseIdx = 0;
+      if (prevDailyFans[prevBaseIdx] > 0) {
+        const currPortion = currLastIdx >= 0 ? currDailyFans[currLastIdx] : 0;
+        const crossMonthFans = (nextMonthStart - prevDailyFans[prevBaseIdx]) + currPortion;
+        return Math.max(0, crossMonthFans, prevFans);
+      }
+    }
+  }
+
+  return Math.max(0, prevFans);
+}
+
+/**
  * Run the full auto-import process:
- * 1. Fetch data from uma.moe
+ * 1. Fetch data from uma.moe (current month + previous month if in first 7 days)
  * 2. Match trainer_name with bot's in_game_name or uma_trainer_name
  * 3. Auto-register unmatched members
- * 4. Calculate weekly fans for each member
+ * 4. Calculate weekly fans for each member (handles cross-month boundaries)
  * 5. Update members only if new fan count is higher than current
  * @returns {Promise<{ imported: number, skipped: number, unmatched: string[], errors: string[], total: number, autoRegistered: number }>}
  */
@@ -106,8 +151,24 @@ async function runAutoImport() {
   const jstNow = new Date(now.getTime() + jstOffset);
   const fetchYear = jstNow.getUTCFullYear();
   const fetchMonth = jstNow.getUTCMonth() + 1;
+  const jstDay = jstNow.getUTCDate();
+
+  // Compute previous month's year/month
+  const prevMonth = fetchMonth === 1 ? 12 : fetchMonth - 1;
+  const prevYear = fetchMonth === 1 ? fetchYear - 1 : fetchYear;
 
   const data = await fetchCircleData(circleId, fetchYear, fetchMonth);
+
+  // In the first 7 days of the month, also fetch previous month to handle cross-month weeks
+  let prevData = null;
+  if (jstDay <= 7) {
+    try {
+      prevData = await fetchCircleData(circleId, prevYear, prevMonth);
+    } catch (_) {
+      // Previous month data unavailable — proceed with current month only
+    }
+  }
+
   const allMembers = getAllMembers();
 
   let imported = 0;
@@ -136,11 +197,25 @@ async function runAutoImport() {
     }
 
     try {
-      const weeklyFans = calculateWeeklyFans(
-        umaMember.daily_fans,
-        fetchYear,
-        fetchMonth
-      );
+      let weeklyFans;
+
+      if (prevData) {
+        const prevMember = prevData.members.find(m =>
+          m.trainer_name.toLowerCase() === umaMember.trainer_name.toLowerCase()
+        );
+        if (prevMember) {
+          weeklyFans = calculateCrossMonthWeeklyFans(
+            umaMember.daily_fans, fetchYear, fetchMonth,
+            prevMember.daily_fans, prevMember.next_month_start,
+            prevYear, prevMonth
+          );
+        } else {
+          weeklyFans = calculateWeeklyFans(umaMember.daily_fans, fetchYear, fetchMonth);
+        }
+      } else {
+        weeklyFans = calculateWeeklyFans(umaMember.daily_fans, fetchYear, fetchMonth);
+      }
+
       // Only update if new value is higher than what's currently stored
       if (weeklyFans > dbMember.weekly_fans_current) {
         const thresholds = getThresholds();
@@ -158,4 +233,4 @@ async function runAutoImport() {
   return { imported, skipped, unmatched, errors, total: data.members.length, autoRegistered };
 }
 
-module.exports = { fetchCircleData, findLastDataIndex, findWeekBaseIndex, calculateWeeklyFans, runAutoImport, DEFAULT_CIRCLE_ID };
+module.exports = { fetchCircleData, findLastDataIndex, findWeekBaseIndex, calculateWeeklyFans, calculateCrossMonthWeeklyFans, runAutoImport, DEFAULT_CIRCLE_ID };
