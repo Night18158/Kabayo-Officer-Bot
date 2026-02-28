@@ -157,16 +157,36 @@ async function runAutoImport() {
   const prevMonth = fetchMonth === 1 ? 12 : fetchMonth - 1;
   const prevYear = fetchMonth === 1 ? fetchYear - 1 : fetchYear;
 
-  const data = await fetchCircleData(circleId, fetchYear, fetchMonth);
+  // Always fetch both months — current may be empty at month boundaries
+  let currentData, prevData;
+  try {
+    currentData = await fetchCircleData(circleId, fetchYear, fetchMonth);
+  } catch (e) {
+    console.error(`Failed to fetch current month (${fetchYear}-${fetchMonth}):`, e.message);
+    currentData = { members: [] };
+  }
+  try {
+    prevData = await fetchCircleData(circleId, prevYear, prevMonth);
+  } catch (e) {
+    console.error(`Failed to fetch prev month (${prevYear}-${prevMonth}):`, e.message);
+    prevData = { members: [] };
+  }
 
-  // In the first 7 days of the month, also fetch previous month to handle cross-month weeks
-  let prevData = null;
-  if (jstDay <= 7) {
-    try {
-      prevData = await fetchCircleData(circleId, prevYear, prevMonth);
-    } catch (_) {
-      // Previous month data unavailable — proceed with current month only
-    }
+  const currentMembers = (currentData && currentData.members) || [];
+  const prevMembers = (prevData && prevData.members) || [];
+
+  // If current month has no data yet (e.g. first days of new month), fall back to previous month
+  const umaMembers = currentMembers.length > 0 ? currentMembers : prevMembers;
+  const primaryYear = currentMembers.length > 0 ? fetchYear : prevYear;
+  const primaryMonth = currentMembers.length > 0 ? fetchMonth : prevMonth;
+
+  // Build a lookup map for the other month's member data
+  const secondaryMembers = currentMembers.length > 0 ? prevMembers : currentMembers;
+  const secondaryYear = currentMembers.length > 0 ? prevYear : fetchYear;
+  const secondaryMonth = currentMembers.length > 0 ? prevMonth : fetchMonth;
+  const secondaryMap = new Map();
+  for (const m of secondaryMembers) {
+    secondaryMap.set(m.trainer_name.toLowerCase(), m);
   }
 
   const allMembers = getAllMembers();
@@ -177,7 +197,7 @@ async function runAutoImport() {
   const unmatched = [];
   const errors = [];
 
-  for (const umaMember of data.members) {
+  for (const umaMember of umaMembers) {
     let dbMember = allMembers.find(m =>
       (m.uma_trainer_name &&
         m.uma_trainer_name.toLowerCase() === umaMember.trainer_name.toLowerCase()) ||
@@ -199,21 +219,20 @@ async function runAutoImport() {
     try {
       let weeklyFans;
 
-      if (prevData) {
-        const prevMember = prevData.members.find(m =>
-          m.trainer_name.toLowerCase() === umaMember.trainer_name.toLowerCase()
+      const secondaryMember = secondaryMap.get(umaMember.trainer_name.toLowerCase());
+
+      // When using current month as primary, try cross-month calculation in first 7 days
+      if (currentMembers.length > 0 && jstDay <= 7 && secondaryMember) {
+        weeklyFans = calculateCrossMonthWeeklyFans(
+          umaMember.daily_fans, primaryYear, primaryMonth,
+          secondaryMember.daily_fans, secondaryMember.next_month_start,
+          secondaryYear, secondaryMonth
         );
-        if (prevMember) {
-          weeklyFans = calculateCrossMonthWeeklyFans(
-            umaMember.daily_fans, fetchYear, fetchMonth,
-            prevMember.daily_fans, prevMember.next_month_start,
-            prevYear, prevMonth
-          );
-        } else {
-          weeklyFans = calculateWeeklyFans(umaMember.daily_fans, fetchYear, fetchMonth);
-        }
+      } else if (currentMembers.length === 0 && secondaryMember) {
+        // Primary is previous month; secondary is current (which is empty) — just use prev month alone
+        weeklyFans = calculateWeeklyFans(umaMember.daily_fans, primaryYear, primaryMonth);
       } else {
-        weeklyFans = calculateWeeklyFans(umaMember.daily_fans, fetchYear, fetchMonth);
+        weeklyFans = calculateWeeklyFans(umaMember.daily_fans, primaryYear, primaryMonth);
       }
 
       // Only update if new value is higher than what's currently stored
@@ -230,7 +249,7 @@ async function runAutoImport() {
     }
   }
 
-  return { imported, skipped, unmatched, errors, total: data.members.length, autoRegistered };
+  return { imported, skipped, unmatched, errors, total: umaMembers.length, autoRegistered };
 }
 
 module.exports = { fetchCircleData, findLastDataIndex, findWeekBaseIndex, calculateWeeklyFans, calculateCrossMonthWeeklyFans, runAutoImport, DEFAULT_CIRCLE_ID };

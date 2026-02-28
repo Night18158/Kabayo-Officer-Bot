@@ -65,10 +65,10 @@ client.once('ready', async () => {
 
   // Helper: run auto-import and persist results
   async function doAutoImport(source) {
-    console.log(`Auto-import [${source}]: running at ${new Date().toISOString()}...`);
+    console.log(`Auto-import [${source}]: starting at ${new Date().toISOString()}`);
     try {
       const result = await runAutoImport();
-      console.log(`Auto-import [${source}]: imported=${result.imported}, skipped=${result.skipped}, unmatched=${result.unmatched.length}, errors=${result.errors.length}`);
+      console.log(`Auto-import [${source}]: imported=${result.imported}, skipped=${result.skipped}, unmatched=${result.unmatched.length}, errors=${result.errors.length}, total=${result.total}`);
       if (result.errors.length > 0) {
         console.error(`Auto-import [${source}] errors:`, result.errors);
       }
@@ -80,8 +80,8 @@ client.once('ready', async () => {
     }
   }
 
-  // 30 s after boot — quick import with whatever data uma.moe has right now
-  setTimeout(() => doAutoImport('boot-30s'), 30 * 1000);
+  // 90 s after boot — quick import with whatever data uma.moe has right now
+  setTimeout(() => doAutoImport('boot-90s'), 90 * 1000);
 
   // 3 h after boot — fresh data should be available by then
   setTimeout(() => doAutoImport('boot-3h'), 3 * 60 * 60 * 1000);
@@ -146,9 +146,9 @@ client.once('ready', async () => {
     }
   }, { timezone: 'Asia/Tokyo' });
 
-  // Every 6 hours — Auto-import from uma.moe (catches all timezone edge cases)
-  cron.schedule('0 */6 * * *', async () => {
-    await doAutoImport('cron-6h');
+  // 01:00, 07:00, 13:00, 19:00 JST — Auto-import from uma.moe (data updates ~30 min after 00:00 JST reset)
+  cron.schedule('0 1,7,13,19 * * *', async () => {
+    await doAutoImport('cron-daily');
   }, { timezone: 'Asia/Tokyo' });
 
   // Daily 12:00 JST — Streak alert DMs for at-risk members
@@ -167,7 +167,7 @@ client.on('interactionCreate', async interaction => {
 
   // Channel restriction check
   const botChannel = getSetting('channel_bot_commands');
-  const exemptCommands = ['set-bot-channels', 'set-officer-roles', 'set-channels'];
+  const exemptCommands = ['set-bot-channels', 'set-officer-roles', 'set-channels', 'set-roles'];
   if (botChannel && !exemptCommands.includes(interaction.commandName) && interaction.channelId !== botChannel) {
     return interaction.reply({
       content: `❌ Please use bot commands in <#${botChannel}>`,

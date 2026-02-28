@@ -54,7 +54,7 @@ module.exports = {
         '`/set-officer-roles` — Define officer/leader/member roles',
         '',
         '⏰ **Automatic Schedule (JST):**',
-        'Daily 07:00 — Auto-import from uma.moe',
+        'Daily 01:00, 07:00, 13:00, 19:00 — Auto-import from uma.moe',
         'Mon 04:05 — New week announcement',
         'Thu 12:00 — Midweek checkpoint',
         'Sun 10:00 — Push Day morning',
