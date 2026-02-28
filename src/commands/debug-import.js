@@ -41,35 +41,43 @@ module.exports = {
 
       const prevMonth = fetchMonth === 1 ? 12 : fetchMonth - 1;
       const prevYear = fetchMonth === 1 ? fetchYear - 1 : fetchYear;
-      const isFirstWeek = jstDay <= 7;
 
-      const data = await fetchCircleData(circleId, fetchYear, fetchMonth);
-
-      let prevData = null;
-      if (isFirstWeek) {
-        try {
-          prevData = await fetchCircleData(circleId, prevYear, prevMonth);
-        } catch (_) {
-          // Previous month unavailable
-        }
+      let data, prevData;
+      try {
+        data = await fetchCircleData(circleId, fetchYear, fetchMonth);
+      } catch (_) {
+        data = { members: [] };
+      }
+      try {
+        prevData = await fetchCircleData(circleId, prevYear, prevMonth);
+      } catch (_) {
+        prevData = { members: [] };
       }
 
-      const allMembers = getAllMembers();
-      const memberMap = new Map(allMembers.map(m => [m.in_game_name.toLowerCase(), m]));
+      const currentMembers = (data && data.members) || [];
+      const prevMembers = (prevData && prevData.members) || [];
 
-      // Calculate samples for first 3 uma.moe members
+      // Determine which month is actually used as primary source
+      const usingPrev = currentMembers.length === 0 && prevMembers.length > 0;
+      const activeMembers = usingPrev ? prevMembers : currentMembers;
+      const activeYear = usingPrev ? prevYear : fetchYear;
+      const activeMonth = usingPrev ? prevMonth : fetchMonth;
+
+      const allMembers = getAllMembers();
+
+      // Calculate samples for first 3 uma.moe members (from active source)
       const sampleLines = [];
       const compareLines = [];
 
-      for (const umaMember of data.members.slice(0, 3)) {
+      for (const umaMember of activeMembers.slice(0, 3)) {
         const df = umaMember.daily_fans || [];
         const lastIdx = findLastDataIndex(df);
-        let baseIdx = lastIdx >= 0 ? findWeekBaseIndex(fetchYear, fetchMonth, lastIdx) : -1;
+        let baseIdx = lastIdx >= 0 ? findWeekBaseIndex(activeYear, activeMonth, lastIdx) : -1;
         if (baseIdx < 0) baseIdx = 0;
 
         const lastVal = lastIdx >= 0 ? df[lastIdx] : 0;
         const baseVal = df[baseIdx] || 0;
-        const weeklyFans = calculateWeeklyFans(df, fetchYear, fetchMonth);
+        const weeklyFans = calculateWeeklyFans(df, activeYear, activeMonth);
 
         sampleLines.push(
           `• **${umaMember.trainer_name}**: lastIdx=${lastIdx}, baseIdx=${baseIdx}, ` +
@@ -77,9 +85,17 @@ module.exports = {
         );
       }
 
-      // Compare DB vs API for all members (show first 5 matches)
+      // Compare DB vs API for all members (show first 5 matches, using active source)
+      const secondaryMembers = usingPrev ? currentMembers : prevMembers;
+      const secondaryYear = usingPrev ? fetchYear : prevYear;
+      const secondaryMonth = usingPrev ? fetchMonth : prevMonth;
+      const secondaryMap = new Map();
+      for (const m of secondaryMembers) {
+        secondaryMap.set(m.trainer_name.toLowerCase(), m);
+      }
+
       let compareCount = 0;
-      for (const umaMember of data.members) {
+      for (const umaMember of activeMembers) {
         if (compareCount >= 5) break;
 
         const dbMember =
@@ -91,21 +107,15 @@ module.exports = {
         if (!dbMember) continue;
 
         let weeklyFans;
-        if (prevData) {
-          const prevMember = prevData.members.find(m =>
-            m.trainer_name.toLowerCase() === umaMember.trainer_name.toLowerCase()
+        const secondaryMember = secondaryMap.get(umaMember.trainer_name.toLowerCase());
+        if (!usingPrev && secondaryMember) {
+          weeklyFans = calculateCrossMonthWeeklyFans(
+            umaMember.daily_fans, activeYear, activeMonth,
+            secondaryMember.daily_fans, secondaryMember.next_month_start,
+            secondaryYear, secondaryMonth
           );
-          if (prevMember) {
-            weeklyFans = calculateCrossMonthWeeklyFans(
-              umaMember.daily_fans, fetchYear, fetchMonth,
-              prevMember.daily_fans, prevMember.next_month_start,
-              prevYear, prevMonth
-            );
-          } else {
-            weeklyFans = calculateWeeklyFans(umaMember.daily_fans, fetchYear, fetchMonth);
-          }
         } else {
-          weeklyFans = calculateWeeklyFans(umaMember.daily_fans, fetchYear, fetchMonth);
+          weeklyFans = calculateWeeklyFans(umaMember.daily_fans, activeYear, activeMonth);
         }
 
         const dbFans = dbMember.weekly_fans_current;
@@ -122,13 +132,16 @@ module.exports = {
         ? new Date(lastImportTime).toISOString()
         : 'Never';
 
+      const currentMonthLabel = `${fetchYear}-${String(fetchMonth).padStart(2, '0')}`;
+      const prevMonthLabel = `${prevYear}-${String(prevMonth).padStart(2, '0')}`;
+
       const lines = [
         '🔍 **Import Debug Info**',
         '',
         `📅 JST Date: ${jstDateStr} (${dayName})`,
-        `📅 Fetch: year=${fetchYear}, month=${fetchMonth}${isFirstWeek ? ` (also fetching prev month: ${prevYear}-${String(prevMonth).padStart(2, '0')})` : ''}`,
+        `📅 Current month (${currentMonthLabel}): ${currentMembers.length} members${currentMembers.length === 0 ? '' : usingPrev ? '' : ' ← using this'}`,
+        `📅 Previous month (${prevMonthLabel}): ${prevMembers.length} members${usingPrev ? ' ← using this' : ''}`,
         `🔢 Circle ID: ${circleId}`,
-        `👥 Members from uma.moe: ${data.members.length}`,
         '',
         '**Sample (first 3 members):**',
         ...sampleLines,
@@ -137,7 +150,7 @@ module.exports = {
         ...compareLines,
         '',
         `⏰ Last auto-import: ${lastImportStr}`,
-        '⏰ Auto-import cron: every 6 hours (Asia/Tokyo)',
+        '⏰ Auto-import cron: 01:00, 07:00, 13:00, 19:00 JST',
       ];
 
       await interaction.editReply({ content: lines.join('\n') });

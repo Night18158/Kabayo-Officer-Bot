@@ -31,7 +31,7 @@ module.exports = {
 
     setSetting('channel_bot_commands', channel.id);
     return interaction.reply({
-      content: `✅ Bot commands are now restricted to <#${channel.id}>.\nExempt commands: \`/set-bot-channels\`, \`/set-officer-roles\`, \`/set-channels\`.`,
+      content: `✅ Bot commands are now restricted to <#${channel.id}>.\nExempt commands: \`/set-bot-channels\`, \`/set-officer-roles\`, \`/set-channels\`, \`/set-roles\`.`,
       ephemeral: true,
     });
   },
