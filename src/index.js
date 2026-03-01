@@ -76,6 +76,7 @@ client.once('ready', async () => {
       setSetting('last_import_time', new Date().toISOString());
       setSetting('last_import_result', JSON.stringify(result));
       await postDailyFanUpdate(client);
+      await sendStreakAlertDMs(client);
     } catch (err) {
       console.error(`Auto-import [${source}] FATAL:`, err.message, err.stack);
     }
@@ -147,20 +148,11 @@ client.once('ready', async () => {
     }
   }, { timezone: 'Asia/Tokyo' });
 
-  // 01:00, 07:00, 13:00, 19:00 JST — Auto-import from uma.moe (data updates ~30 min after 00:00 JST reset)
-  cron.schedule('0 1,7,13,19 * * *', async () => {
+  // 01:00 JST — Auto-import from uma.moe (data updates ~30 min after 00:00 JST reset)
+  cron.schedule('0 1 * * *', async () => {
     await doAutoImport('cron-daily');
   }, { timezone: 'Asia/Tokyo' });
 
-  // Daily 12:00 JST — Streak alert DMs for at-risk members
-  cron.schedule('0 12 * * *', async () => {
-    console.log('Cron: streak alert DMs (daily 12:00 JST)');
-    try {
-      await sendStreakAlertDMs(client);
-    } catch (err) {
-      console.error('Cron: streak alert DMs failed:', err);
-    }
-  }, { timezone: 'Asia/Tokyo' });
 });
 
 client.on('interactionCreate', async interaction => {
