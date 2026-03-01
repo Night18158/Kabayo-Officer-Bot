@@ -1,5 +1,5 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { getMember, getGuildStats, getMemberStats, getAllMembers } = require('../database');
+const { db, getMember, getGuildStats, getMemberStats, getAllMembers } = require('../database');
 const { formatFans } = require('../utils/formatters');
 const { getStatusEmoji } = require('../utils/statusLogic');
 
@@ -12,12 +12,19 @@ module.exports = {
         .setName('user')
         .setDescription('View a specific member\'s stats (defaults to guild stats)')
         .setRequired(false)
+    )
+    .addStringOption(opt =>
+      opt
+        .setName('name')
+        .setDescription('Look up by in-game name or uma trainer name')
+        .setRequired(false)
     ),
 
   async execute(interaction) {
     const targetUser = interaction.options.getUser('user');
+    const targetName = interaction.options.getString('name');
 
-    if (!targetUser) {
+    if (!targetUser && !targetName) {
       // Guild stats
       const stats = getGuildStats();
 
@@ -50,15 +57,25 @@ module.exports = {
     }
 
     // Individual member stats
-    const dbMember = getMember(targetUser.id);
+    let dbMember;
+    if (targetUser) {
+      dbMember = getMember(targetUser.id);
+    } else {
+      dbMember = db.prepare(
+        'SELECT * FROM members WHERE LOWER(in_game_name) = LOWER(?) OR LOWER(uma_trainer_name) = LOWER(?)'
+      ).get(targetName, targetName);
+    }
+
     if (!dbMember) {
+      const identifier = targetUser ? `<@${targetUser.id}>` : `**${targetName}**`;
       return interaction.reply({
-        content: `❌ <@${targetUser.id}> is not registered yet.`,
+        content: `❌ No member found for ${identifier}.`,
         ephemeral: true,
       });
     }
 
-    const stats = getMemberStats(targetUser.id);
+    const discordUserId = dbMember.discord_user_id;
+    const stats = getMemberStats(discordUserId);
 
     if (stats.totalWeeks === 0) {
       return interaction.reply({
