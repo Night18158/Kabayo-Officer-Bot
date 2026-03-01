@@ -50,24 +50,26 @@ module.exports = {
     await interaction.deferReply({ ephemeral: true });
 
     try {
+      let result;
+
       switch (type) {
         case 'daily-update':
-          await postDailyFanUpdate(client);
+          result = await postDailyFanUpdate(client);
           break;
         case 'midweek':
-          await postMidweekCheckpoint(client);
+          result = await postMidweekCheckpoint(client);
           break;
         case 'push-morning':
-          await postPushDayMorning(client);
+          result = await postPushDayMorning(client);
           break;
         case 'push-evening':
-          await postPushDayEvening(client);
+          result = await postPushDayEvening(client);
           break;
         case 'final-push':
           await sendFinalPushDMs(client);
           break;
         case 'week-start':
-          await postNewWeekMessage(client);
+          result = await postNewWeekMessage(client);
           break;
         case 'week-close-report':
           await sendWeekCloseWarningDMs(client);
@@ -81,6 +83,13 @@ module.exports = {
       }
 
       const dmTypes = ['final-push', 'week-close-report', 'streak-alert'];
+      if (!dmTypes.includes(type) && result && !result.success) {
+        await interaction.editReply({
+          content: `❌ Notification \`${type}\` failed: ${result.reason}`,
+        });
+        return;
+      }
+
       const sentTo = dmTypes.includes(type) ? 'eligible members via DM' : 'the configured channel';
       await interaction.editReply({
         content: `✅ Sent \`${type}\` notification to ${sentTo}.`,
