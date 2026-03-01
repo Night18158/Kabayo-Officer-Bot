@@ -65,6 +65,15 @@ module.exports = {
 
       const allMembers = getAllMembers();
 
+      // Build secondary month lookup (needed for cross-month samples and compare)
+      const secondaryMembers = usingPrev ? currentMembers : prevMembers;
+      const secondaryYear = usingPrev ? fetchYear : prevYear;
+      const secondaryMonth = usingPrev ? fetchMonth : prevMonth;
+      const secondaryMap = new Map();
+      for (const m of secondaryMembers) {
+        secondaryMap.set(m.trainer_name.toLowerCase(), m);
+      }
+
       // Calculate samples for first 3 uma.moe members (from active source)
       const sampleLines = [];
       const compareLines = [];
@@ -79,19 +88,23 @@ module.exports = {
         const baseVal = df[baseIdx] || 0;
         const weeklyFans = calculateWeeklyFans(df, activeYear, activeMonth);
 
+        let sampleSuffix = '';
+        if (!usingPrev && jstDay <= 7) {
+          const secondaryMember = secondaryMap.get(umaMember.trainer_name.toLowerCase());
+          if (secondaryMember) {
+            const crossMonthFans = calculateCrossMonthWeeklyFans(
+              df, activeYear, activeMonth,
+              secondaryMember.daily_fans, secondaryMember.next_month_start,
+              secondaryYear, secondaryMonth
+            );
+            sampleSuffix = `, crossMonthFans=${formatFans(crossMonthFans)}`;
+          }
+        }
+
         sampleLines.push(
           `• **${umaMember.trainer_name}**: lastIdx=${lastIdx}, baseIdx=${baseIdx}, ` +
-          `daily[${lastIdx}]=${formatFans(lastVal)}, daily[${baseIdx}]=${formatFans(baseVal)}, weeklyFans=${formatFans(weeklyFans)}`
+          `daily[${lastIdx}]=${formatFans(lastVal)}, daily[${baseIdx}]=${formatFans(baseVal)}, weeklyFans=${formatFans(weeklyFans)}${sampleSuffix}`
         );
-      }
-
-      // Compare DB vs API for all members (show first 5 matches, using active source)
-      const secondaryMembers = usingPrev ? currentMembers : prevMembers;
-      const secondaryYear = usingPrev ? fetchYear : prevYear;
-      const secondaryMonth = usingPrev ? fetchMonth : prevMonth;
-      const secondaryMap = new Map();
-      for (const m of secondaryMembers) {
-        secondaryMap.set(m.trainer_name.toLowerCase(), m);
       }
 
       let compareCount = 0;
