@@ -8,6 +8,7 @@ const {
   weekHistoryExists,
   recalculateStreaksFromHistory,
   autoRegisterMember,
+  isBlacklisted,
 } = require('../database');
 const { calculateStatus } = require('../utils/statusLogic');
 const { fetchCircleData, DEFAULT_CIRCLE_ID } = require('../utils/umaImport');
@@ -195,6 +196,9 @@ async function runImportHistory() {
   const trainerToMember = new Map();
 
   for (const trainerName of allTrainerNames) {
+    // Skip blacklisted trainer names — don't auto-register them
+    if (isBlacklisted(trainerName)) continue;
+
     let dbMember = dbMembers.find(m =>
       (m.uma_trainer_name &&
         m.uma_trainer_name.toLowerCase() === trainerName.toLowerCase()) ||
