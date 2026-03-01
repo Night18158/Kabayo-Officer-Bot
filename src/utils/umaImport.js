@@ -125,7 +125,15 @@ function calculateCrossMonthWeeklyFans(currDailyFans, currYear, currMonth, prevD
     let prevBaseIdx = daysInPrevMonth + currBaseIdx; // currBaseIdx is negative
     if (prevBaseIdx < 0) prevBaseIdx = 0;
     if (prevDailyFans[prevBaseIdx] > 0) {
-      const currPortion = currLastIdx >= 0 ? currDailyFans[currLastIdx] : 0;
+      // Current month portion: incremental gains within the new month only.
+      // daily_fans[0] is the cumulative value at the start of the month (not incremental gains).
+      // If we only have day 1 of data (currLastIdx === 0), there are no incremental
+      // gains within the month yet, so currPortion = 0.
+      // If we have multiple days, currPortion = daily_fans[lastDay] - daily_fans[0].
+      let currPortion = 0;
+      if (currLastIdx > 0) {
+        currPortion = currDailyFans[currLastIdx] - (currDailyFans[0] || 0);
+      }
       const crossMonthFans = (nextMonthStart - prevDailyFans[prevBaseIdx]) + currPortion;
       return Math.max(0, crossMonthFans, prevFans);
     }
