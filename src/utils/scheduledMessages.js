@@ -10,7 +10,7 @@ const {
 } = require('../database');
 const { formatFans } = require('./formatters');
 const { getTimeUntilReset } = require('./countdown');
-const { fetchCircleData, DEFAULT_CIRCLE_ID } = require('./umaImport');
+const { fetchCircleData, findLastDataIndex, DEFAULT_CIRCLE_ID } = require('./umaImport');
 
 /** Rotating motivational messages used across scheduled posts. */
 const MOTIVATIONAL_MESSAGES = [
@@ -398,32 +398,59 @@ async function postDailyFanUpdate(client) {
   const MONTH_NAMES_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const dateLabel = `${DAY_NAMES[dayOfWeek]}, ${jstDay} ${MONTH_NAMES_SHORT[jstMonth - 1]}`;
 
-  // uma.moe data uses Madrid/CET timezone (UTC+1) — use this for data indices and fetching
+  // uma.moe data uses Madrid/CET timezone (UTC+1) — use this for data fetching
   const UMA_OFFSET = 1 * 60 * 60 * 1000; // UTC+1 (CET)
   const umaNow = new Date(Date.now() + UMA_OFFSET);
   const fetchYear = umaNow.getUTCFullYear();
   const fetchMonth = umaNow.getUTCMonth() + 1;
-  const umaDay = umaNow.getUTCDate();
-
-  const todayIdx = umaDay - 1;
-  const yesterdayIdx = todayIdx - 1;
 
   const circleId = getSetting('uma_circle_id') || DEFAULT_CIRCLE_ID;
-  let data, prevData = null;
+  let data, activeData, activeMonth;
+  let todayIdx = -1, yesterdayIdx = -1;
 
   try {
     data = await fetchCircleData(circleId, fetchYear, fetchMonth);
 
-    // Month boundary: if today is day 1, fetch previous month for yesterday's value
-    if (todayIdx === 0) {
+    // uma.moe always has YESTERDAY's data, not today's. daily_fans[0] is a start-of-month
+    // baseline (same value as the previous month's next_month_start), not a real gain day.
+    // Find the last index with actual data across all members; we need latestIdx >= 1
+    // to have two days to compare.
+    let latestIdx = -1;
+    for (const m of data.members) {
+      if (!m.daily_fans) continue;
+      const idx = findLastDataIndex(m.daily_fans);
+      if (idx > latestIdx) latestIdx = idx;
+    }
+
+    if (latestIdx <= 0) {
+      // Current month has no useful gain data — fall back to previous month
       const prevMonth = fetchMonth === 1 ? 12 : fetchMonth - 1;
       const prevYear = fetchMonth === 1 ? fetchYear - 1 : fetchYear;
       try {
-        prevData = await fetchCircleData(circleId, prevYear, prevMonth);
+        const prevData = await fetchCircleData(circleId, prevYear, prevMonth);
+        let prevLatestIdx = -1;
+        for (const m of prevData.members) {
+          if (!m.daily_fans) continue;
+          const idx = findLastDataIndex(m.daily_fans);
+          if (idx > prevLatestIdx) prevLatestIdx = idx;
+        }
+        if (prevLatestIdx >= 1) {
+          activeData = prevData;
+          activeMonth = prevMonth;
+          latestIdx = prevLatestIdx;
+        }
       } catch (_) {
-        // Previous month data unavailable — yesterday's value will be 0
+        // Previous month data unavailable
       }
     }
+
+    if (!activeData) {
+      activeData = data;
+      activeMonth = fetchMonth;
+    }
+
+    todayIdx = latestIdx;
+    yesterdayIdx = latestIdx - 1;
   } catch (err) {
     console.error('postDailyFanUpdate: failed to fetch uma.moe data:', err.message);
     const fallbackEmbed = new EmbedBuilder()
@@ -435,8 +462,8 @@ async function postDailyFanUpdate(client) {
     return trySend(client, channelId, { embeds: [fallbackEmbed] });
   }
 
-  // Check if any members have today's data
-  const hasAnyData = data.members.some(m => m.daily_fans && m.daily_fans[todayIdx] > 0);
+  // Check if any members have enough data (need at least two days to compute a meaningful diff)
+  const hasAnyData = todayIdx >= 1;
 
   if (!hasAnyData) {
     // Fallback: show clean weekly status from DB (same style as other scheduled messages)
@@ -491,23 +518,11 @@ async function postDailyFanUpdate(client) {
   const gains = [];
   let guildTotalGains = 0;
 
-  for (const m of data.members) {
+  for (const m of activeData.members) {
     if (!m.daily_fans || m.daily_fans[todayIdx] == null) continue;
 
     const todayVal = m.daily_fans[todayIdx] || 0;
-    let yesterdayVal = 0;
-
-    if (todayIdx === 0) {
-      // Month boundary: use prev month's next_month_start as yesterday's baseline
-      if (prevData) {
-        const prevMember = prevData.members.find(p =>
-          p.trainer_name.toLowerCase() === m.trainer_name.toLowerCase()
-        );
-        yesterdayVal = prevMember?.next_month_start ?? 0;
-      }
-    } else {
-      yesterdayVal = m.daily_fans[yesterdayIdx] || 0;
-    }
+    const yesterdayVal = m.daily_fans[yesterdayIdx] || 0;
 
     const diff = todayVal - yesterdayVal;
     gains.push({ name: m.trainer_name, diff });
@@ -520,9 +535,12 @@ async function postDailyFanUpdate(client) {
   const activeGains = gains.filter(m => m.diff > 0);
   const noActivity = gains.filter(m => m.diff <= 0);
 
+  const umaDataDayLabel = `${MONTH_NAMES_SHORT[activeMonth - 1]} ${todayIdx + 1}`;
+
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
     .setTitle(`📈 Daily Fan Update — ${dateLabel}`)
+    .setDescription(`📊 Gains from ${umaDataDayLabel} (latest uma.moe data)`)
     .addFields({ name: '📊 Guild Today', value: `+${formatFans(guildTotalGains)} total gained`, inline: false });
 
   // Top 3 gainers with medals
