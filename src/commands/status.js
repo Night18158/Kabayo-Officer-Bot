@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
-const { getMember, getThresholds } = require('../database');
+const { db, getMember, getThresholds } = require('../database');
 const { getStatusEmoji, getStatusLabel, fansNeededForNext } = require('../utils/statusLogic');
 const { formatFans, formatNumber } = require('../utils/formatters');
 
@@ -12,20 +12,40 @@ module.exports = {
         .setName('user')
         .setDescription('Member to check (defaults to yourself)')
         .setRequired(false)
+    )
+    .addStringOption(option =>
+      option
+        .setName('name')
+        .setDescription('Look up by in-game name or uma trainer name')
+        .setRequired(false)
     ),
 
   async execute(interaction) {
-    const targetUser = interaction.options.getUser('user') ?? interaction.user;
-    const dbMember = getMember(targetUser.id);
+    const targetUser = interaction.options.getUser('user');
+    const targetName = interaction.options.getString('name');
+
+    let dbMember;
+
+    if (targetUser) {
+      dbMember = getMember(targetUser.id);
+    } else if (targetName) {
+      dbMember = db.prepare(
+        'SELECT * FROM members WHERE LOWER(in_game_name) = LOWER(?) OR LOWER(uma_trainer_name) = LOWER(?)'
+      ).get(targetName, targetName);
+    } else {
+      dbMember = getMember(interaction.user.id);
+    }
 
     if (!dbMember) {
-      const isSelf = targetUser.id === interaction.user.id;
-      await interaction.reply({
-        content: isSelf
-          ? '❌ You are not registered yet. Use `/link-profile` first.'
-          : `❌ <@${targetUser.id}> is not registered yet.`,
-        ephemeral: true,
-      });
+      let notFoundMsg;
+      if (targetUser) {
+        notFoundMsg = `❌ <@${targetUser.id}> is not registered yet.`;
+      } else if (targetName) {
+        notFoundMsg = `❌ No member found for **${targetName}**.`;
+      } else {
+        notFoundMsg = '❌ You are not registered yet. Use `/link-profile` first.';
+      }
+      await interaction.reply({ content: notFoundMsg, ephemeral: true });
       return;
     }
 
