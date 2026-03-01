@@ -6,6 +6,7 @@ const path = require('path');
 const cron = require('node-cron');
 const config = require('./config');
 const { getSetting, setSetting } = require('./database');
+const { isOfficer } = require('./utils/permissions');
 const { closeWeek } = require('./utils/weekClose');
 const {
   postNewWeekMessage,
@@ -165,14 +166,17 @@ client.once('ready', async () => {
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
-  // Channel restriction check
+  // Channel restriction check — officers and leaders are exempt
   const botChannel = getSetting('channel_bot_commands');
   const exemptCommands = ['set-bot-channels', 'set-officer-roles', 'set-channels', 'set-roles'];
   if (botChannel && !exemptCommands.includes(interaction.commandName) && interaction.channelId !== botChannel) {
-    return interaction.reply({
-      content: `❌ Please use bot commands in <#${botChannel}>`,
-      ephemeral: true,
-    });
+    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+    if (!member || !isOfficer(member)) {
+      return interaction.reply({
+        content: `❌ Please use bot commands in <#${botChannel}>`,
+        ephemeral: true,
+      });
+    }
   }
 
   const command = commands.get(interaction.commandName);

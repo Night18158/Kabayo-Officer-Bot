@@ -1,3 +1,4 @@
+const { EmbedBuilder } = require('discord.js');
 const {
   getAllMembers,
   getMembersWithDmEnabled,
@@ -30,21 +31,45 @@ function randomMotivation() {
 }
 
 /**
+ * Build a text progress bar.
+ * @param {number} current
+ * @param {number} total
+ * @param {number} [length=10]
+ * @returns {string} e.g. "[████████░░] 80%"
+ */
+function buildProgressBar(current, total, length = 10) {
+  if (total === 0) return '[░░░░░░░░░░] 0%';
+  const pct = Math.round((current / total) * 100);
+  const filled = Math.round((current / total) * length);
+  const empty = length - filled;
+  return `[${'█'.repeat(filled)}${'░'.repeat(empty)}] ${pct}%`;
+}
+
+/**
  * Attempt to send a message to a channel by ID.
- * Silently skips if channelId is not configured or channel is unreachable.
+ * Returns { success: true } on success or { success: false, reason: string } on failure.
+ * Accepts either a plain string or a Discord message options object.
  * @param {import('discord.js').Client} client
  * @param {string|null} channelId
- * @param {string} content
+ * @param {string|Object} messageOptions
+ * @returns {Promise<{success: boolean, reason?: string}>}
  */
-async function trySend(client, channelId, content) {
-  if (!channelId) return;
+async function trySend(client, channelId, messageOptions) {
+  if (!channelId) {
+    console.warn('scheduledMessages: no channel ID configured — skipping');
+    return { success: false, reason: 'No channel configured. Use `/set-channels` first.' };
+  }
   try {
     const channel = await client.channels.fetch(channelId);
     if (channel && channel.isTextBased()) {
-      await channel.send({ content });
+      const opts = typeof messageOptions === 'string' ? { content: messageOptions } : messageOptions;
+      await channel.send(opts);
+      return { success: true };
     }
+    return { success: false, reason: `Channel <#${channelId}> is not a text channel.` };
   } catch (err) {
     console.error(`scheduledMessages: failed to send to channel ${channelId}:`, err.message);
+    return { success: false, reason: `Failed: ${err.message}` };
   }
 }
 
@@ -69,26 +94,35 @@ function calcStats() {
 /**
  * Post the "New Week Started" announcement in channel_tracker.
  * @param {import('discord.js').Client} client
+ * @returns {Promise<{success: boolean, reason?: string}>}
  */
 async function postNewWeekMessage(client) {
   const channelId = getSetting('channel_tracker');
   const weekLabel = getCurrentWeekLabel();
-  const msg = [
-    '🏇 **New Kabayo Week Started!**',
-    '',
-    `Week: ${weekLabel}`,
-    '',
-    '**Weekly Targets:**',
-    '🟢 Target: 4.8M+',
-    '🟡 Minimum: 4.2M',
-    '⚡ Elite: 5.5M+',
-    '',
-    'Fans are tracked automatically from uma.moe.',
-    'Officers can manually adjust with `/submit` or `/set-fans` if needed.',
-    '',
-    "Let's have a strong week everyone! 🔥",
-  ].join('\n');
-  await trySend(client, channelId, msg);
+  const thresholds = getThresholds();
+  const embed = new EmbedBuilder()
+    .setColor(0x2ecc71)
+    .setTitle('🏇 New Kabayo Week Started!')
+    .addFields(
+      { name: 'Week', value: weekLabel, inline: false },
+      {
+        name: '📋 Weekly Targets',
+        value: [
+          `🟢 Target (GREEN): ${formatFans(thresholds.target_fans)}+`,
+          `🟡 Minimum (YELLOW): ${formatFans(thresholds.min_fans)}`,
+          `⚡ Elite: ${formatFans(thresholds.elite_fans)}+`,
+        ].join('\n'),
+        inline: false,
+      },
+      {
+        name: 'ℹ️ Info',
+        value: 'Fans are tracked automatically from uma.moe.\nOfficers can manually adjust with `/submit` or `/set-fans` if needed.',
+        inline: false,
+      }
+    )
+    .setFooter({ text: "Let's have a strong week everyone! 🔥" })
+    .setTimestamp();
+  return trySend(client, channelId, { embeds: [embed] });
 }
 
 /**
@@ -107,32 +141,53 @@ function getTop3Lines() {
   return lines;
 }
 
+/** Medal emojis for top 3. */
+const MEDALS = ['🥇', '🥈', '🥉'];
+
+/**
+ * Format the top 3 performers as a string for embed fields.
+ * @returns {string}
+ */
+function formatTop3Text() {
+  const top3 = getAllMembers().filter(m => m.weekly_fans_current > 0).slice(0, 3);
+  if (top3.length === 0) return 'No submissions yet';
+  return top3.map((m, i) => `${MEDALS[i]} **${m.in_game_name}** — ${formatFans(m.weekly_fans_current)}`).join('\n');
+}
+
 /**
  * Post the midweek checkpoint in channel_tracker and DM at-risk members.
  * @param {import('discord.js').Client} client
+ * @returns {Promise<{success: boolean, reason?: string}>}
  */
 async function postMidweekCheckpoint(client) {
   const channelId = getSetting('channel_tracker');
-  const { avg, green, yellow, red, noSub } = calcStats();
+  const { avg, green, yellow, red, noSub, memberCount } = calcStats();
   const { formatted: countdown } = getTimeUntilReset();
 
-  const msg = [
-    '📊 **Midweek Checkpoint**',
-    '',
-    `Guild Average: ${formatFans(Math.round(avg))}`,
-    'Target Average: 4.8M',
-    '',
-    `🟢 ${green} members already GREEN`,
-    `🟡 ${yellow} members on track`,
-    `🔴 ${red} members need a push`,
-    `📭 ${noSub} members haven't submitted yet`,
-    '',
-    `⏳ Time remaining: ${countdown} until weekly reset`,
-    '',
-    ...getTop3Lines(),
-    'Still plenty of time — small daily runs make the difference! 💪',
-  ].join('\n');
-  await trySend(client, channelId, msg);
+  const top3Text = formatTop3Text();
+
+  const embed = new EmbedBuilder()
+    .setColor(0xf39c12)
+    .setTitle('📊 Midweek Checkpoint')
+    .addFields(
+      { name: '📈 Guild Average', value: `${formatFans(Math.round(avg))} / 4.8M target`, inline: false },
+      {
+        name: '📊 Status Breakdown',
+        value: [
+          `🟢 GREEN: **${green}**  🟡 YELLOW: **${yellow}**`,
+          `🔴 RED: **${red}**  📭 No submission: **${noSub}**`,
+          buildProgressBar(green, memberCount),
+          `${green}/${memberCount} members GREEN`,
+        ].join('\n'),
+        inline: false,
+      },
+      { name: '⏳ Time Remaining', value: `${countdown} until weekly reset`, inline: false },
+      { name: '🏆 Top 3', value: top3Text, inline: false }
+    )
+    .setFooter({ text: 'Still plenty of time — small daily runs make the difference! 💪' })
+    .setTimestamp();
+
+  const result = await trySend(client, channelId, { embeds: [embed] });
 
   // DM at-risk members (RED or no submission)
   const dmEnabled = getMembersWithDmEnabled();
@@ -166,60 +221,76 @@ async function postMidweekCheckpoint(client) {
       // User has DMs disabled or is not reachable — skip silently
     }
   }
+
+  return result;
 }
 
 /**
  * Post the Push Day morning message in channel_push.
  * @param {import('discord.js').Client} client
+ * @returns {Promise<{success: boolean, reason?: string}>}
  */
 async function postPushDayMorning(client) {
   const channelId = getSetting('channel_push');
-  const { avg, green, yellow, red, noSub, memberCount } = calcStats();
+  const { avg, green, memberCount } = calcStats();
   const { formatted: countdown } = getTimeUntilReset();
   const needGreen = memberCount - green;
 
-  const msg = [
-    '🔥 **KABAYO FAN PUSH DAY** 🔥',
-    '',
-    `Current Guild Average: ${formatFans(Math.round(avg))}`,
-    'Top 500 Stable Target: 4.8M',
-    '',
-    `⏳ Time remaining: ${countdown} until weekly reset`,
-    '',
-    `📊 ${needGreen} member(s) still need to reach GREEN`,
-    '',
-    'Today is our team push day.',
-    'Even +300K helps the guild massively.',
-    '',
-    randomMotivation(),
-  ].join('\n');
-  await trySend(client, channelId, msg);
+  const embed = new EmbedBuilder()
+    .setColor(0xe74c3c)
+    .setTitle('🔥 KABAYO FAN PUSH DAY 🔥')
+    .addFields(
+      { name: '📈 Current Guild Average', value: formatFans(Math.round(avg)), inline: true },
+      { name: '🎯 Target', value: '4.8M', inline: true },
+      { name: '⏳ Time Remaining', value: `${countdown} until weekly reset`, inline: false },
+      {
+        name: '📊 Progress',
+        value: [
+          buildProgressBar(green, memberCount),
+          `${green}/${memberCount} members GREEN — **${needGreen}** still need a push`,
+        ].join('\n'),
+        inline: false,
+      }
+    )
+    .setDescription(
+      'Today is our team push day.\nEven +300K helps the guild massively.\n\n' + randomMotivation()
+    )
+    .setTimestamp();
+  return trySend(client, channelId, { embeds: [embed] });
 }
 
 /**
  * Post the Push Day evening update in channel_push.
  * @param {import('discord.js').Client} client
+ * @returns {Promise<{success: boolean, reason?: string}>}
  */
 async function postPushDayEvening(client) {
   const channelId = getSetting('channel_push');
-  const { avg, green, yellow, red, noSub } = calcStats();
+  const { avg, green, yellow, red, noSub, memberCount } = calcStats();
   const { formatted: countdown } = getTimeUntilReset();
 
-  const msg = [
-    '⏰ **Push Day Update**',
-    '',
-    `Guild Average: ${formatFans(Math.round(avg))}`,
-    `⏳ Time remaining: ${countdown} until weekly reset`,
-    '',
-    `🟢 ${green} already GREEN`,
-    `🟡 ${yellow} on track`,
-    `🔴 ${red} still need a push`,
-    `📭 ${noSub} haven't submitted yet`,
-    '',
-    ...getTop3Lines(),
-    randomMotivation(),
-  ].join('\n');
-  await trySend(client, channelId, msg);
+  const top3Text = formatTop3Text();
+
+  const embed = new EmbedBuilder()
+    .setColor(0xe67e22)
+    .setTitle('⏰ Push Day Update')
+    .addFields(
+      { name: '📈 Guild Average', value: formatFans(Math.round(avg)), inline: true },
+      { name: '⏳ Time Remaining', value: `${countdown} until weekly reset`, inline: true },
+      {
+        name: '📊 Status Breakdown',
+        value: [
+          `🟢 ${green} already GREEN  🟡 ${yellow} on track`,
+          `🔴 ${red} still need a push  📭 ${noSub} haven't submitted yet`,
+          buildProgressBar(green, memberCount),
+        ].join('\n'),
+        inline: false,
+      },
+      { name: '🏆 Top 3', value: top3Text, inline: false }
+    )
+    .setFooter({ text: randomMotivation() })
+    .setTimestamp();
+  return trySend(client, channelId, { embeds: [embed] });
 }
 
 /**
@@ -308,25 +379,50 @@ async function sendWeekCloseWarningDMs(client) {
  * Post a daily fan update to channel_push with guild average, breakdown,
  * top 3 performers, time until reset, and a random motivational message.
  * @param {import('discord.js').Client} client
+ * @returns {Promise<{success: boolean, reason?: string}>}
  */
 async function postDailyFanUpdate(client) {
   const channelId = getSetting('channel_push');
-  const { avg, green, yellow, red, noSub } = calcStats();
+  const { avg, green, yellow, red, noSub, memberCount } = calcStats();
   const { formatted: countdown } = getTimeUntilReset();
+  const thresholds = getThresholds();
 
-  const msg = [
-    '📈 **Daily Fan Update**',
-    '',
-    `Guild Average: ${formatFans(Math.round(avg))}`,
-    '',
-    `🟢 GREEN: ${green}  🟡 YELLOW: ${yellow}  🔴 RED: ${red}  📭 No submission: ${noSub}`,
-    '',
-    ...getTop3Lines(),
-    `⏳ Time until weekly reset: ${countdown}`,
-    '',
-    randomMotivation(),
-  ].join('\n');
-  await trySend(client, channelId, msg);
+  const allMembers = getAllMembers();
+  const top3Text = formatTop3Text();
+
+  // "Almost GREEN" — members within 500K of the target threshold but not yet GREEN
+  const almostGreen = allMembers.filter(
+    m => m.weekly_status !== 'GREEN' && m.weekly_fans_current > 0 &&
+         thresholds.target_fans - m.weekly_fans_current <= 500000
+  );
+  const almostGreenText = almostGreen.length > 0
+    ? almostGreen.map(m => `• **${m.in_game_name}** — ${formatFans(m.weekly_fans_current)} (${formatFans(thresholds.target_fans - m.weekly_fans_current)} to go)`).join('\n')
+    : null;
+
+  const embed = new EmbedBuilder()
+    .setColor(0x3498db)
+    .setTitle('📈 Daily Fan Update')
+    .addFields(
+      { name: '📊 Guild Average', value: `${formatFans(Math.round(avg))} / ${formatFans(thresholds.target_fans)} target`, inline: false },
+      {
+        name: '📋 Status Breakdown',
+        value: [
+          `🟢 GREEN: **${green}**  🟡 YELLOW: **${yellow}**  🔴 RED: **${red}**  📭 No sub: **${noSub}**`,
+          buildProgressBar(green, memberCount),
+          `${green}/${memberCount} members GREEN`,
+        ].join('\n'),
+        inline: false,
+      },
+      { name: '🏆 Top 3', value: top3Text, inline: false }
+    )
+    .setFooter({ text: `${randomMotivation()} • ⏳ ${countdown} until reset` })
+    .setTimestamp();
+
+  if (almostGreenText) {
+    embed.addFields({ name: '🔔 Almost GREEN (within 500K)', value: almostGreenText, inline: false });
+  }
+
+  return trySend(client, channelId, { embeds: [embed] });
 }
 
 /**
