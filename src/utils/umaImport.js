@@ -5,6 +5,7 @@ const {
   setSetting,
   submitFans,
   autoRegisterMember,
+  isBlacklisted,
 } = require('../database');
 const { calculateStatus } = require('./statusLogic');
 
@@ -149,7 +150,7 @@ function calculateCrossMonthWeeklyFans(currDailyFans, currYear, currMonth, prevD
  * 3. Auto-register unmatched members
  * 4. Calculate weekly fans for each member (handles cross-month boundaries)
  * 5. Update members only if new fan count is higher than current
- * @returns {Promise<{ imported: number, skipped: number, unmatched: string[], errors: string[], total: number, autoRegistered: number }>}
+ * @returns {Promise<{ imported: number, skipped: number, unmatched: string[], errors: string[], total: number, autoRegistered: number, blacklisted: number }>}
  */
 async function runAutoImport() {
   const circleId = getSetting('uma_circle_id') || DEFAULT_CIRCLE_ID;
@@ -203,10 +204,17 @@ async function runAutoImport() {
   let imported = 0;
   let skipped = 0;
   let autoRegistered = 0;
+  let blacklisted = 0;
   const unmatched = [];
   const errors = [];
 
   for (const umaMember of umaMembers) {
+    // Skip members on the import blacklist
+    if (isBlacklisted(umaMember.trainer_name)) {
+      blacklisted++;
+      continue;
+    }
+
     let dbMember = allMembers.find(m =>
       (m.uma_trainer_name &&
         m.uma_trainer_name.toLowerCase() === umaMember.trainer_name.toLowerCase()) ||
@@ -258,7 +266,7 @@ async function runAutoImport() {
     }
   }
 
-  return { imported, skipped, unmatched, errors, total: umaMembers.length, autoRegistered };
+  return { imported, skipped, unmatched, errors, total: umaMembers.length, autoRegistered, blacklisted };
 }
 
 module.exports = { fetchCircleData, findLastDataIndex, findWeekBaseIndex, calculateWeeklyFans, calculateCrossMonthWeeklyFans, runAutoImport, DEFAULT_CIRCLE_ID };

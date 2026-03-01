@@ -28,6 +28,7 @@ module.exports = {
         `📥 Imported: ${result.imported} members`,
         `🆕 Auto-registered: ${result.autoRegistered} new members`,
         `⏭️ Skipped: ${result.skipped} members (already at higher count)`,
+        `🚫 Blacklisted: ${result.blacklisted} members (skipped by blacklist)`,
         `❓ Unmatched: ${result.unmatched.length} members`,
         unmatchedList,
         result.unmatched.length > 0 ? '\nUse `/link-profile` to link unmatched names.' : '',

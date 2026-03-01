@@ -22,6 +22,13 @@ db.pragma('journal_mode = WAL');
 // --- Schema ---
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS import_blacklist (
+    trainer_name TEXT PRIMARY KEY,
+    added_by     TEXT,
+    reason       TEXT,
+    created_at   TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS members (
     discord_user_id         TEXT PRIMARY KEY,
     in_game_name            TEXT NOT NULL,
@@ -674,6 +681,52 @@ function getMemberGreenCount(discordUserId) {
   return row ? row.cnt : 0;
 }
 
+/**
+ * Add a trainer name to the import blacklist.
+ * @param {string} trainerName
+ * @param {string} addedBy - Discord user ID of the officer who added it
+ * @param {string} reason
+ */
+function addToBlacklist(trainerName, addedBy, reason) {
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT OR IGNORE INTO import_blacklist (trainer_name, added_by, reason, created_at)
+    VALUES (?, ?, ?, ?)
+  `).run(trainerName, addedBy, reason || null, now);
+}
+
+/**
+ * Remove a trainer name from the import blacklist.
+ * @param {string} trainerName
+ * @returns {boolean} true if a row was deleted
+ */
+function removeFromBlacklist(trainerName) {
+  const result = db.prepare(
+    'DELETE FROM import_blacklist WHERE LOWER(trainer_name) = LOWER(?)'
+  ).run(trainerName);
+  return result.changes > 0;
+}
+
+/**
+ * Check if a trainer name is on the import blacklist (case-insensitive).
+ * @param {string} trainerName
+ * @returns {boolean}
+ */
+function isBlacklisted(trainerName) {
+  const row = db.prepare(
+    'SELECT 1 FROM import_blacklist WHERE LOWER(trainer_name) = LOWER(?)'
+  ).get(trainerName);
+  return !!row;
+}
+
+/**
+ * Get all entries in the import blacklist.
+ * @returns {Array<{ trainer_name: string, added_by: string, reason: string, created_at: string }>}
+ */
+function getBlacklist() {
+  return db.prepare('SELECT * FROM import_blacklist ORDER BY created_at DESC').all();
+}
+
 module.exports = {
   db,
   DB_PATH,
@@ -712,4 +765,8 @@ module.exports = {
   weekHistoryExists,
   recalculateStreaksFromHistory,
   fullLeaderboardReset,
+  addToBlacklist,
+  removeFromBlacklist,
+  isBlacklisted,
+  getBlacklist,
 };
