@@ -16,14 +16,20 @@ module.exports = {
     try {
       const circleId = getSetting('uma_circle_id') || DEFAULT_CIRCLE_ID;
 
-      // Calculate JST date
+      // Calculate JST date — used only for the display label (game timezone)
       const jstOffset = 9 * 60 * 60 * 1000;
       const jstNow = new Date(Date.now() + jstOffset);
-      const fetchYear = jstNow.getUTCFullYear();
-      const fetchMonth = jstNow.getUTCMonth() + 1;
-      const jstDay = jstNow.getUTCDate(); // 1-indexed
+      const jstDay = jstNow.getUTCDate();
+      const jstMonth = jstNow.getUTCMonth() + 1;
 
-      const todayIdx = jstDay - 1;   // 0-indexed
+      // uma.moe data uses Madrid/CET timezone (UTC+1) — use this for data indices and fetching
+      const UMA_OFFSET = 1 * 60 * 60 * 1000; // UTC+1 (CET)
+      const umaNow = new Date(Date.now() + UMA_OFFSET);
+      const fetchYear = umaNow.getUTCFullYear();
+      const fetchMonth = umaNow.getUTCMonth() + 1;
+      const umaDay = umaNow.getUTCDate(); // 1-indexed
+
+      const todayIdx = umaDay - 1;   // 0-indexed
       const yesterdayIdx = todayIdx - 1;
 
       const data = await fetchCircleData(circleId, fetchYear, fetchMonth);
@@ -47,7 +53,7 @@ module.exports = {
 
       if (!hasAnyData) {
         await interaction.editReply({
-          content: `📊 **Daily Fan Difference**\n\nNo fan data available for today (${MONTH_NAMES[fetchMonth - 1]} ${jstDay}) yet. Data is usually updated once a day.`,
+          content: `📊 **Daily Fan Difference**\n\nNo fan data available for today (${MONTH_NAMES[jstMonth - 1]} ${jstDay}) yet. Data is usually updated once a day.`,
         });
         return;
       }
@@ -85,7 +91,7 @@ module.exports = {
       diffs.sort((a, b) => b.diff - a.diff);
 
       // Format date range in header
-      const monthName = MONTH_NAMES[fetchMonth - 1];
+      const monthName = MONTH_NAMES[jstMonth - 1];
       let headerDate;
       if (todayIdx === 0) {
         const prevMonth = fetchMonth === 1 ? 12 : fetchMonth - 1;

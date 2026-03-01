@@ -387,19 +387,25 @@ async function postDailyFanUpdate(client) {
   const channelId = getSetting('channel_push');
   const { formatted: countdown } = getTimeUntilReset();
 
-  // Calculate JST date
+  // Calculate JST date — used only for the display label (game timezone)
   const jstOffset = 9 * 60 * 60 * 1000;
   const jstNow = new Date(Date.now() + jstOffset);
-  const fetchYear = jstNow.getUTCFullYear();
-  const fetchMonth = jstNow.getUTCMonth() + 1;
   const jstDay = jstNow.getUTCDate();
   const dayOfWeek = jstNow.getUTCDay();
+  const jstMonth = jstNow.getUTCMonth() + 1;
 
   const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const MONTH_NAMES_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const dateLabel = `${DAY_NAMES[dayOfWeek]}, ${jstDay} ${MONTH_NAMES_SHORT[fetchMonth - 1]}`;
+  const dateLabel = `${DAY_NAMES[dayOfWeek]}, ${jstDay} ${MONTH_NAMES_SHORT[jstMonth - 1]}`;
 
-  const todayIdx = jstDay - 1;
+  // uma.moe data uses Madrid/CET timezone (UTC+1) — use this for data indices and fetching
+  const UMA_OFFSET = 1 * 60 * 60 * 1000; // UTC+1 (CET)
+  const umaNow = new Date(Date.now() + UMA_OFFSET);
+  const fetchYear = umaNow.getUTCFullYear();
+  const fetchMonth = umaNow.getUTCMonth() + 1;
+  const umaDay = umaNow.getUTCDate();
+
+  const todayIdx = umaDay - 1;
   const yesterdayIdx = todayIdx - 1;
 
   const circleId = getSetting('uma_circle_id') || DEFAULT_CIRCLE_ID;
