@@ -118,15 +118,16 @@ function calculateCrossMonthWeeklyFans(currDailyFans, currYear, currMonth, prevD
 
   // If next_month_start is available, try cross-month combination
   if (nextMonthStart != null && nextMonthStart >= 0) {
-    const prevLastIdx = findLastDataIndex(prevDailyFans);
-    if (prevLastIdx >= 0) {
-      let prevBaseIdx = findWeekBaseIndex(prevYear, prevMonth, prevLastIdx);
-      if (prevBaseIdx < 0) prevBaseIdx = 0;
-      if (prevDailyFans[prevBaseIdx] > 0) {
-        const currPortion = currLastIdx >= 0 ? currDailyFans[currLastIdx] : 0;
-        const crossMonthFans = (nextMonthStart - prevDailyFans[prevBaseIdx]) + currPortion;
-        return Math.max(0, crossMonthFans, prevFans);
-      }
+    // Use current month's week context to find the correct baseline day in the previous month.
+    // currBaseIdx < 0 means the Sunday baseline falls before the 1st of the current month.
+    // Map it into the previous month: e.g. currBaseIdx=-1 → last day of prev month, etc.
+    const daysInPrevMonth = new Date(Date.UTC(currYear, currMonth - 1, 0)).getUTCDate();
+    let prevBaseIdx = daysInPrevMonth + currBaseIdx; // currBaseIdx is negative
+    if (prevBaseIdx < 0) prevBaseIdx = 0;
+    if (prevDailyFans[prevBaseIdx] > 0) {
+      const currPortion = currLastIdx >= 0 ? currDailyFans[currLastIdx] : 0;
+      const crossMonthFans = (nextMonthStart - prevDailyFans[prevBaseIdx]) + currPortion;
+      return Math.max(0, crossMonthFans, prevFans);
     }
   }
 

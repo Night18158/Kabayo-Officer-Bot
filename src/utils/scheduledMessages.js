@@ -433,80 +433,51 @@ async function postDailyFanUpdate(client) {
   const hasAnyData = data.members.some(m => m.daily_fans && m.daily_fans[todayIdx] > 0);
 
   if (!hasAnyData) {
-    // Fallback to DB-based weekly progress when uma.moe has no daily data yet
-    let avg = 0, allMembers = [], thresholds = {};
-    try {
-      ({ avg } = calcStats());
-      allMembers = getAllMembers();
-      thresholds = getThresholds();
-    } catch (dbErr) {
-      console.error('postDailyFanUpdate: failed to load DB fallback data:', dbErr.message);
-    }
+    // Fallback: show clean weekly status from DB (same style as other scheduled messages)
+    const { avg, green, yellow, red, noSub, memberCount } = calcStats();
+    const thresholds = getThresholds();
+    const top3Text = formatTop3Text();
 
     const fallbackEmbed = new EmbedBuilder()
       .setColor(0x3498db)
       .setTitle(`📈 Daily Fan Update — ${dateLabel}`)
-      .setDescription('⏳ Daily gains data not yet available from uma.moe');
-
-    // Guild average field
-    const targetFans = thresholds?.target_fans ?? 0;
-    const avgText = targetFans > 0
-      ? `Guild Average: ${formatFans(avg)} / ${formatFans(targetFans)} target`
-      : `Guild Average: ${formatFans(avg)}`;
-    fallbackEmbed.addFields({ name: '📊 Weekly Progress So Far', value: avgText, inline: false });
-
-    // Top 3 weekly
-    fallbackEmbed.addFields({ name: '🏆 Top 3 (Weekly)', value: formatTop3Text(), inline: false });
-
-    // All members sorted by weekly_fans_current DESC — chunked to stay under 1024 chars
-    if (allMembers.length > 0) {
-      const memberLines = allMembers
-        .slice()
-        .sort((a, b) => b.weekly_fans_current - a.weekly_fans_current)
-        .map(m => `• ${m.in_game_name} — ${formatFans(m.weekly_fans_current)}`);
-      const chunks = [];
-      let current = '';
-      for (const line of memberLines) {
-        const next = current ? `${current}\n${line}` : line;
-        if (next.length > 1024) {
-          chunks.push(current);
-          current = line;
-        } else {
-          current = next;
-        }
-      }
-      if (current) chunks.push(current);
-      for (let i = 0; i < chunks.length; i++) {
-        const fieldName = i === 0 ? '📋 All Members (Weekly Total)' : '📋 (continued)';
-        fallbackEmbed.addFields({ name: fieldName, value: chunks[i], inline: false });
-      }
-    }
-
-    // No submission yet — chunked to stay under 1024 chars
-    const noSub = allMembers.filter(m => m.weekly_fans_current === 0);
-    if (noSub.length > 0) {
-      const noSubLines = noSub.map(m => `• ${m.in_game_name}`);
-      const noSubChunks = [];
-      let noSubCurrent = '';
-      for (const line of noSubLines) {
-        const next = noSubCurrent ? `${noSubCurrent}\n${line}` : line;
-        if (next.length > 1024) {
-          noSubChunks.push(noSubCurrent);
-          noSubCurrent = line;
-        } else {
-          noSubCurrent = next;
-        }
-      }
-      if (noSubCurrent) noSubChunks.push(noSubCurrent);
-      for (let i = 0; i < noSubChunks.length; i++) {
-        const fieldName = i === 0 ? '📭 No submission yet' : '📭 (continued)';
-        fallbackEmbed.addFields({ name: fieldName, value: noSubChunks[i], inline: false });
-      }
-    }
-
-    fallbackEmbed
+      .setDescription('⏳ Daily gains data not yet available from uma.moe')
+      .addFields(
+        { name: '📊 Guild Average', value: `${formatFans(Math.round(avg))} / ${formatFans(thresholds.target_fans)} target`, inline: false },
+        {
+          name: '📋 Status Breakdown',
+          value: [
+            `🟢 GREEN: **${green}**  🟡 YELLOW: **${yellow}**  🔴 RED: **${red}**  📭 No sub: **${noSub}**`,
+            buildProgressBar(green, memberCount),
+            `${green}/${memberCount} members GREEN`,
+          ].join('\n'),
+          inline: false,
+        },
+        { name: '🏆 Top 3', value: top3Text, inline: false }
+      )
       .setFooter({ text: `${randomMotivation()} • ⏳ ${countdown} until reset` })
       .setTimestamp();
+
+    // Add "Almost GREEN" section for members within 500K of target
+    const almostGreen = getAllMembers().filter(
+      m => m.weekly_status !== 'GREEN' && m.weekly_fans_current > 0 &&
+           thresholds.target_fans - m.weekly_fans_current <= 500000
+    );
+    if (almostGreen.length > 0) {
+      const lines = almostGreen.map(
+        m => `• **${m.in_game_name}** — ${formatFans(m.weekly_fans_current)} (${formatFans(thresholds.target_fans - m.weekly_fans_current)} to go)`
+      );
+      let almostGreenText = '';
+      for (const line of lines) {
+        const next = almostGreenText ? `${almostGreenText}\n${line}` : line;
+        if (next.length > 1024) break;
+        almostGreenText = next;
+      }
+      if (almostGreenText) {
+        fallbackEmbed.addFields({ name: '🔔 Almost GREEN (within 500K)', value: almostGreenText, inline: false });
+      }
+    }
+
     return trySend(client, channelId, { embeds: [fallbackEmbed] });
   }
 
