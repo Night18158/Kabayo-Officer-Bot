@@ -10,6 +10,7 @@ const {
 } = require('../database');
 const { formatFans } = require('./formatters');
 const { getTimeUntilReset } = require('./countdown');
+const { fetchCircleData, DEFAULT_CIRCLE_ID } = require('./umaImport');
 
 /** Rotating motivational messages used across scheduled posts. */
 const MOTIVATIONAL_MESSAGES = [
@@ -376,51 +377,147 @@ async function sendWeekCloseWarningDMs(client) {
 }
 
 /**
- * Post a daily fan update to channel_push with guild average, breakdown,
+ * Post a daily fan update to channel_push showing 24h gains per member,
  * top 3 performers, time until reset, and a random motivational message.
+ * Fetches live data from the uma.moe API (same as /daily-diff).
  * @param {import('discord.js').Client} client
  * @returns {Promise<{success: boolean, reason?: string}>}
  */
 async function postDailyFanUpdate(client) {
   const channelId = getSetting('channel_push');
-  const { avg, green, yellow, red, noSub, memberCount } = calcStats();
   const { formatted: countdown } = getTimeUntilReset();
-  const thresholds = getThresholds();
 
-  const allMembers = getAllMembers();
-  const top3Text = formatTop3Text();
+  // Calculate JST date
+  const jstOffset = 9 * 60 * 60 * 1000;
+  const jstNow = new Date(Date.now() + jstOffset);
+  const fetchYear = jstNow.getUTCFullYear();
+  const fetchMonth = jstNow.getUTCMonth() + 1;
+  const jstDay = jstNow.getUTCDate();
+  const dayOfWeek = jstNow.getUTCDay();
 
-  // "Almost GREEN" — members within 500K of the target threshold but not yet GREEN
-  const almostGreen = allMembers.filter(
-    m => m.weekly_status !== 'GREEN' && m.weekly_fans_current > 0 &&
-         thresholds.target_fans - m.weekly_fans_current <= 500000
-  );
-  const almostGreenText = almostGreen.length > 0
-    ? almostGreen.map(m => `• **${m.in_game_name}** — ${formatFans(m.weekly_fans_current)} (${formatFans(thresholds.target_fans - m.weekly_fans_current)} to go)`).join('\n')
-    : null;
+  const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const MONTH_NAMES_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const dateLabel = `${DAY_NAMES[dayOfWeek]}, ${jstDay} ${MONTH_NAMES_SHORT[fetchMonth - 1]}`;
+
+  const todayIdx = jstDay - 1;
+  const yesterdayIdx = todayIdx - 1;
+
+  const circleId = getSetting('uma_circle_id') || DEFAULT_CIRCLE_ID;
+  let data, prevData = null;
+
+  try {
+    data = await fetchCircleData(circleId, fetchYear, fetchMonth);
+
+    // Month boundary: if today is day 1, fetch previous month for yesterday's value
+    if (todayIdx === 0) {
+      const prevMonth = fetchMonth === 1 ? 12 : fetchMonth - 1;
+      const prevYear = fetchMonth === 1 ? fetchYear - 1 : fetchYear;
+      try {
+        prevData = await fetchCircleData(circleId, prevYear, prevMonth);
+      } catch (_) {
+        // Previous month data unavailable — yesterday's value will be 0
+      }
+    }
+  } catch (err) {
+    console.error('postDailyFanUpdate: failed to fetch uma.moe data:', err.message);
+    const fallbackEmbed = new EmbedBuilder()
+      .setColor(0x3498db)
+      .setTitle(`📈 Daily Fan Update — ${dateLabel}`)
+      .setDescription('⚠️ Unable to fetch fan data from uma.moe. Please check back later.')
+      .setFooter({ text: `${randomMotivation()} • ⏳ ${countdown} until reset` })
+      .setTimestamp();
+    return trySend(client, channelId, { embeds: [fallbackEmbed] });
+  }
+
+  // Check if any members have today's data
+  const hasAnyData = data.members.some(m => m.daily_fans && m.daily_fans[todayIdx] > 0);
+
+  if (!hasAnyData) {
+    const noDataEmbed = new EmbedBuilder()
+      .setColor(0x3498db)
+      .setTitle(`📈 Daily Fan Update — ${dateLabel}`)
+      .setDescription(`No fan data available for today (${MONTH_NAMES_SHORT[fetchMonth - 1]} ${jstDay}) yet. Data is usually updated once a day.`)
+      .setFooter({ text: `${randomMotivation()} • ⏳ ${countdown} until reset` })
+      .setTimestamp();
+    return trySend(client, channelId, { embeds: [noDataEmbed] });
+  }
+
+  // Calculate 24h gains for each member
+  const gains = [];
+  let guildTotalGains = 0;
+
+  for (const m of data.members) {
+    if (!m.daily_fans || m.daily_fans[todayIdx] == null) continue;
+
+    const todayVal = m.daily_fans[todayIdx] || 0;
+    let yesterdayVal = 0;
+
+    if (todayIdx === 0) {
+      // Month boundary: use prev month's next_month_start as yesterday's baseline
+      if (prevData) {
+        const prevMember = prevData.members.find(p =>
+          p.trainer_name.toLowerCase() === m.trainer_name.toLowerCase()
+        );
+        yesterdayVal = prevMember?.next_month_start ?? 0;
+      }
+    } else {
+      yesterdayVal = m.daily_fans[yesterdayIdx] || 0;
+    }
+
+    const diff = todayVal - yesterdayVal;
+    gains.push({ name: m.trainer_name, diff });
+    if (diff > 0) guildTotalGains += diff;
+  }
+
+  // Sort highest gains first
+  gains.sort((a, b) => b.diff - a.diff);
+
+  const activeGains = gains.filter(m => m.diff > 0);
+  const noActivity = gains.filter(m => m.diff <= 0);
 
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
-    .setTitle('📈 Daily Fan Update')
-    .addFields(
-      { name: '📊 Guild Average', value: `${formatFans(Math.round(avg))} / ${formatFans(thresholds.target_fans)} target`, inline: false },
-      {
-        name: '📋 Status Breakdown',
-        value: [
-          `🟢 GREEN: **${green}**  🟡 YELLOW: **${yellow}**  🔴 RED: **${red}**  📭 No sub: **${noSub}**`,
-          buildProgressBar(green, memberCount),
-          `${green}/${memberCount} members GREEN`,
-        ].join('\n'),
-        inline: false,
-      },
-      { name: '🏆 Top 3', value: top3Text, inline: false }
-    )
+    .setTitle(`📈 Daily Fan Update — ${dateLabel}`)
+    .addFields({ name: '📊 Guild Today', value: `+${formatFans(guildTotalGains)} total gained`, inline: false });
+
+  // Top 3 gainers with medals
+  if (activeGains.length > 0) {
+    const top3Lines = activeGains.slice(0, 3).map((m, i) => `${MEDALS[i]} **${m.name}** — +${formatFans(m.diff)}`);
+    embed.addFields({ name: '🏆 Top Gainers (24h)', value: top3Lines.join('\n'), inline: false });
+  }
+
+  // All members list sorted by 24h gains descending — split into chunks to stay under Discord's 1024-char field limit
+  if (gains.length > 0) {
+    const allLines = gains.map(m => `• **${m.name}** — ${m.diff > 0 ? '+' : ''}${formatFans(m.diff)}`);
+    const chunks = [];
+    let current = '';
+    for (const line of allLines) {
+      const next = current ? `${current}\n${line}` : line;
+      if (next.length > 1024) {
+        chunks.push(current);
+        current = line;
+      } else {
+        current = next;
+      }
+    }
+    if (current) chunks.push(current);
+
+    for (let i = 0; i < chunks.length; i++) {
+      const fieldName = i === 0 ? '📋 All Members (24h gains)' : '📋 (continued)';
+      embed.addFields({ name: fieldName, value: chunks[i], inline: false });
+    }
+  }
+
+  // No activity section
+  if (noActivity.length > 0) {
+    const noActivityLines = noActivity.map(m => `• ${m.name}`);
+    const noActivityText = noActivityLines.join('\n').slice(0, 1024);
+    embed.addFields({ name: '⚠️ No activity (0 gains today)', value: noActivityText, inline: false });
+  }
+
+  embed
     .setFooter({ text: `${randomMotivation()} • ⏳ ${countdown} until reset` })
     .setTimestamp();
-
-  if (almostGreenText) {
-    embed.addFields({ name: '🔔 Almost GREEN (within 500K)', value: almostGreenText, inline: false });
-  }
 
   return trySend(client, channelId, { embeds: [embed] });
 }
