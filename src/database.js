@@ -374,6 +374,31 @@ function emergencyReset() {
 }
 
 /**
+ * Full leaderboard reset: back up the database, then wipe all fan-related fields
+ * on every member. Does NOT delete members or touch guild_settings/member_notes.
+ * @returns {{ affected: number, backupPath: string }}
+ */
+function fullLeaderboardReset() {
+  const timestamp = new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-');
+  const backupPath = path.join(BACKUP_DIR, `kabayo-pre-reset-${timestamp}.db`);
+  fs.copyFileSync(DB_PATH, backupPath);
+
+  const result = db.prepare(`
+    UPDATE members SET
+      weekly_fans_current       = 0,
+      weekly_fans_previous      = 0,
+      weekly_status             = 'RED',
+      streak_target_weeks       = 0,
+      streak_elite_weeks        = 0,
+      consecutive_red_weeks     = 0,
+      last_submission_timestamp = NULL,
+      fan_source                = NULL
+  `).run();
+
+  return { affected: result.changes, backupPath };
+}
+
+/**
  * Auto-register a member from uma.moe with a placeholder discord_user_id.
  * Used when a trainer_name is found in uma.moe but has no match in the bot DB.
  * @param {string} trainerName - The trainer name from uma.moe
@@ -686,4 +711,5 @@ module.exports = {
   getMemberGreenCount,
   weekHistoryExists,
   recalculateStreaksFromHistory,
+  fullLeaderboardReset,
 };

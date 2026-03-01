@@ -49,6 +49,7 @@ module.exports = {
         '`/note user:@member [text:<note>]` — Add or view private notes',
         '`/backup` — Download the database file',
         '`/export` — Export member data as CSV',
+        '`/reset-leaderboard confirm:CONFIRM [clear-history]` — Wipe all fan data for clean re-import',
         '',
         '👑 **Leader Commands** (Guild Leader only):',
         '`/set-officer-roles` — Define officer/leader/member roles',
