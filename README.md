@@ -100,6 +100,7 @@ Run these commands once after the bot is online:
 | `/goal` | See how many fans you need to reach the next tier |
 | `/compare user:@member` | Compare your stats with another member |
 | `/help` | Show all available commands |
+| `/ask question:<text>` | Ask the offline AI assistant (requires local Ollama) |
 | `/link-profile trainer:<name>` | Link your uma.moe trainer name to your Discord account |
 | `/feedback message:<text>` | Send anonymous feedback to officers |
 | `/dm-warnings [enable/disable]` | Toggle personal push-day DM reminders |
@@ -159,7 +160,29 @@ All times are JST (UTC+9).
 | 🟡 YELLOW | ≥ 4.2M weekly fans | On track |
 | 🔴 RED | < 4.2M weekly fans | Needs attention |
 
-## Technology
+## Offline AI Assistant (Airi)
+
+The bot includes an optional offline AI assistant powered by [Ollama](https://ollama.com). Because Ollama runs locally on your machine, **no internet connection is required** for AI responses — the assistant works 100% offline.
+
+### Setup
+
+1. Install Ollama from <https://ollama.com>
+2. Pull a model (e.g. `llama3`):
+   ```bash
+   ollama pull llama3
+   ```
+3. Add the following to your `.env` (defaults shown):
+   ```env
+   OLLAMA_HOST=http://127.0.0.1:11434
+   OLLAMA_MODEL=llama3
+   ```
+4. Start Ollama and then start the bot as usual.
+
+Once configured, members can use `/ask` to chat with the AI assistant. It understands the Uma Musume fan-tracking context and can provide game tips, strategy advice, and motivation.
+
+If Ollama is not running, the `/ask` command will return a friendly setup message instead of an error.
+
+
 
 | Component | Technology |
 |-----------|-----------|

@@ -17,6 +17,7 @@ module.exports = {
         '`/week status` — View current week overview & countdown',
         '`/link-profile uma-name:<name>` — Link your uma.moe trainer name',
         '`/feedback type:<type> message:<text>` — Send feedback to officers',
+        '`/ask question:<text>` — Ask the offline AI assistant (requires local Ollama)',
         '`/stats [@user]` — View guild or member statistics',
         '`/me` — Your personal comprehensive summary',
         '`/top` — Top 5 members by fans this week',
