@@ -299,7 +299,8 @@ function resetWeeklyFans() {
       streak_elite_weeks      = CASE WHEN weekly_fans_current >= ? THEN streak_elite_weeks + 1 ELSE 0 END,
       consecutive_red_weeks   = CASE WHEN weekly_status = 'RED' THEN consecutive_red_weeks + 1 ELSE 0 END,
       weekly_fans_current     = 0,
-      weekly_status           = 'RED'
+      weekly_status           = 'RED',
+      last_submission_source  = 'reset'
   `).run(thresholds.streak_target_threshold, thresholds.elite_fans);
 }
 
@@ -377,7 +378,7 @@ function getRedWeekSummary() {
  * streaks or consecutive red week counters. For testing/emergency use only.
  */
 function emergencyReset() {
-  db.prepare(`UPDATE members SET weekly_fans_current = 0, weekly_status = 'RED'`).run();
+  db.prepare(`UPDATE members SET weekly_fans_current = 0, weekly_status = 'RED', last_submission_source = 'reset'`).run();
 }
 
 /**

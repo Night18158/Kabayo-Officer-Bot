@@ -252,8 +252,9 @@ async function runAutoImport() {
         weeklyFans = calculateWeeklyFans(umaMember.daily_fans, primaryYear, primaryMonth);
       }
 
-      // Only update if new value is higher than what's currently stored
-      if (weeklyFans > dbMember.weekly_fans_current) {
+      // Always update on first import after a weekly reset; otherwise only update if higher
+      const isPostReset = dbMember.last_submission_source === 'reset';
+      if (isPostReset || weeklyFans > dbMember.weekly_fans_current) {
         const thresholds = getThresholds();
         const status = calculateStatus(weeklyFans, thresholds);
         submitFans(dbMember.discord_user_id, weeklyFans, status, 'auto');
