@@ -16,6 +16,11 @@ const config = {
     week_start_day: 1,
     timezone: 'Europe/Madrid',
   },
+
+  ollama: {
+    host: process.env.OLLAMA_HOST ?? 'http://127.0.0.1:11434',
+    model: process.env.OLLAMA_MODEL ?? 'llama3',
+  },
 };
 
 module.exports = config;
